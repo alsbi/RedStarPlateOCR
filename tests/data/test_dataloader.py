@@ -11,8 +11,8 @@ from redstar_plate_ocr.data.dataloader import (
 from redstar_plate_ocr.data.dataset import PlateDataset
 from redstar_plate_ocr.data.transforms import PreprocessPipeline
 
-DATASET_ROOT = "dataset"
-VAL_CSV = "dataset/val/val.csv"
+DATASET_ROOT = "data"
+VAL_CSV = "data/val/val.csv"
 
 
 class TestStratifiedBatchSamplerInterleaving:

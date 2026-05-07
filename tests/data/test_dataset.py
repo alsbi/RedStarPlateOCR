@@ -7,7 +7,7 @@ import pytest
 from redstar_plate_ocr.data.dataset import PlateDataset
 from redstar_plate_ocr.data.transforms import PreprocessPipeline
 
-DATASET_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "dataset")
+DATASET_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 VAL_CSV = os.path.join(DATASET_ROOT, "val", "val.csv")
 
 

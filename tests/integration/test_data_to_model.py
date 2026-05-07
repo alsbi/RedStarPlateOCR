@@ -11,8 +11,8 @@ from redstar_plate_ocr.data.dataset import PlateDataset
 from redstar_plate_ocr.data.transforms import PreprocessPipeline
 from redstar_plate_ocr.nn.model import PlateOCRModel
 
-CSV_PATH = "dataset/val/val.csv"
-DATASET_ROOT = "dataset/"
+CSV_PATH = "data/val/val.csv"
+DATASET_ROOT = "data/"
 
 
 def _val_csv_exists() -> bool:
