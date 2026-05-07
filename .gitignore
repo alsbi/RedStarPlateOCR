@@ -29,18 +29,18 @@ Thumbs.db
 *.onnx
 
 # Data (track sample dataset, ignore large real data)
-data/*
-!data/plates/
-!data/plates/*/
-!data/plates/*/*.png
-!data/plates/*/*.jpg
-!data/plates/*/*.jpeg
-!data/test/
-!data/test/*.csv
-!data/train/
-!data/train/*.csv
-!data/val/
-!data/val/*.csv
+/data/*
+!/data/plates/
+!/data/plates/*/
+!/data/plates/*/*.png
+!/data/plates/*/*.jpg
+!/data/plates/*/*.jpeg
+!/data/test/
+!/data/test/*.csv
+!/data/train/
+!/data/train/*.csv
+!/data/val/
+!/data/val/*.csv
 
 # ============================================================
 # AI / Coding Agent temporary files and directories
