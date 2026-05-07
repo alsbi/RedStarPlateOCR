@@ -1,0 +1,108 @@
+# Model configuration — RedStarPlateOCR v2
+# Architecture: Backbone → Fusion → Classification + AdaptiveCompression → BiLSTM → Multi-Head CTC
+
+preprocessing:
+  canvas_height: 80
+  canvas_width: 192
+  pad_color: 128
+  normalization:
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
+
+backbone:
+  type: dw_se_cnn
+  stem_channels: 192
+  stage1_channels: 192
+  stage1_blocks: 2
+  stage2_channels: 384
+  stage2_blocks: 4
+  stage3_blocks: 2
+  se_reduction: 4
+  activation: silu
+  drop_path_rate: 0.05
+  attention: se
+
+fusion:
+  enabled: true
+
+compression:
+  in_channels: 384
+
+classification:
+  format_head:
+    enabled: true
+    loss_weight: 1.0
+    dropout: 0.2
+  country_head:
+    enabled: true
+    loss_weight: 1.5
+    branch: separate
+    branch_channels: 64
+    grid_rows: 2
+    grid_cols: 4
+    branch_hidden: 256
+    dropout: 0.2
+    confidence_threshold: 0.7
+
+lstm:
+  input_size: 384
+  hidden_size: 256
+  num_layers: 2
+  bidirectional: true
+  dropout: 0.1
+
+ctc:
+  loss_weight: 1.2
+  beam_width: 10
+  default_decoding: greedy
+  blank_last: true
+  head_hidden_size: 512
+
+unified_ctc_head:
+  enabled: true
+  mask_value: -10.0
+  positional_mask: true
+  mask_disable_warmup: true   # No mask during warmup (full union alphabet)
+  mask_ramp_warmup: 3         # Epochs before flat→positional ramp starts
+  mask_ramp_epochs: 8         # Duration of flat→positional linear ramp
+
+char_aux:
+  enabled: true
+
+training:
+  batch_size: 64
+  epochs: 300
+  lr: 0.002
+  weight_decay: 0.02
+  label_smoothing: 0.01
+  gradient_clip: 1.1
+  gradient_clip_type: norm
+  use_amp: true
+  no_aug_epochs: 10
+  warmup_epochs: 3
+  single_aug_epochs: 3
+  num_multi_aug: 1
+  gradient_accumulation_steps: 2
+  synergy_weight: 0.3
+  country_grad_scale: 5.0
+  char_aux_weight: 0.45
+  scheduled_sampling_max_prob: 0.5
+  scheduled_sampling_ramp_epochs: 5
+  square_oversample_ratio: 0.3
+  early_stopping:
+    patience: 10
+    metric: val_cer
+    mode: min
+  scheduler:
+    type: reduce_on_plateau
+    patience: 5
+    factor: 0.5
+    final_lr_factor: 0.01
+  use_trackio: false
+  trackio_project: "redstar-plate-ocr"
+  num_workers: 2
+
+export:
+  onnx_opset: 17
+  simplify: true
+  dynamic_batch: true

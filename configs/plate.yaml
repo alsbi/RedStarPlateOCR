@@ -1,0 +1,185 @@
+regions:
+  RU:
+    pattern: X000XX00o
+    valid_chars:
+      letters: ABEKMHOPCTYXD
+      digits: 0123456789
+  KZ:
+    pattern:
+    - 000XXX00
+    - 00000XXX
+    valid_chars:
+      letters: ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      digits: 0123456789
+    forbidden_combos:
+    - BOK
+    - BOP
+    - BS
+    - CEX
+    - CON
+    - COX
+    - EBI
+    - EBU
+    - EPT
+    - FAC
+    - FAK
+    - FBP
+    - FUC
+    - FUK
+    - GAD
+    - GAI
+    - GAY
+    - GEI
+    - GEY
+    - GOD
+    - HER
+    - HYI
+    - IBU
+    - IIM
+    - IIN
+    - IOH
+    - IOX
+    - ISK
+    - JID
+    - JMI
+    - JOI
+    - JUN
+    - JYN
+    - KAL
+    - KNB
+    - KOT
+    - LOH
+    - LOX
+    - MAL
+    - MVD
+    - OON
+    - OPG
+    - SEX
+    - SIK
+    - SK
+    - SOR
+    - SOP
+    - SOS
+    - SYK
+    - UD
+    - USA
+    - VOR
+    - XER
+    - XUI
+    - XUY
+    - XYE
+    - XYN
+  BY:
+    pattern: 0000XX-0
+    valid_chars:
+      letters: ABEKMHOPCTYXD-
+      digits: 0123456789
+  UA:
+    pattern: XX0000XX
+    valid_chars:
+      letters: ABCEHIKMOPTXD
+      digits: 0123456789
+  UZ:
+    pattern:
+    - 00X000XX
+    - X000XX00
+    valid_chars:
+      letters: ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      digits: 0123456789
+    forbidden_combos:
+    - APC
+    - HUI
+    - HUY
+    - PAA
+    - PPP
+    - PSS
+    - SEX
+    - USB
+    - XUI
+    - XUY
+  KG:
+    pattern:
+    - X0000XX
+    - 00000XXX
+    valid_chars:
+      letters: ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      digits: 0123456789
+    forbidden_combos:
+    - AKC
+    - AKS
+    - AUE
+    - BOP
+    - GEI
+    - GNS
+    - GTS
+    - HER
+    - HUI
+    - HUY
+    - HYI
+    - KAZ
+    - KHP
+    - KOT
+    - LOH
+    - LOX
+    - MBD
+    - MID
+    - MVD
+    - MWD
+    - OPG
+    - SEX
+    - TJK
+    - UZB
+    - VOR
+    - WOR
+    - XEP
+    - XUI
+    - XYI
+    - XYN
+    - ZEK
+    - ZLO
+  GE:
+    pattern: XX-000-XX
+    valid_chars:
+      letters: ABCDEFGHIJKLMNOPQRSTUVWXYZ-
+      digits: 0123456789
+    forbidden_combos:
+    - CEX
+    - FAC
+    - FAK
+    - FUC
+    - FUK
+    - HUI
+    - HUY
+    - SEX
+    - XUI
+    - XUY
+  AM:
+    pattern: 00XX000
+    valid_chars:
+      letters: ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      digits: 0123456789
+    enabled: false
+  AZ:
+    pattern: 00-XX-000
+    valid_chars:
+      letters: ABCDEFGHIJKLMNOPQRSTUVWXYZ-
+      digits: 0123456789
+    enabled: false
+  MD:
+    pattern: XXX000
+    valid_chars:
+      letters: ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      digits: 0123456789
+    enabled: false
+  TJ:
+    pattern: 00XX0000
+    valid_chars:
+      letters: ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      digits: 0123456789
+    enabled: false
+  TM:
+    pattern: 0000XXX
+    valid_chars:
+      letters: ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      digits: 0123456789
+    enabled: false

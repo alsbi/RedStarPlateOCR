@@ -1,0 +1,99 @@
+[project]
+name = "redstar-plate-ocr"
+version = "0.1.0"
+description = "RedStarPlateOCR — License plate OCR with text, region and type recognition"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "torch>=2.7",
+    "torchvision>=0.22",
+    "pydantic>=2.11",
+    "pyyaml>=6.0",
+    "albumentations>=2.0",
+    "pandas>=2.2",
+    "scikit-learn>=1.6",
+    "opencv-python-headless>=4.10",
+    "numpy>=2.0",
+    "typer>=0.25.0",
+    "rich>=14.0.0",
+    "bs4",
+    "selenium",
+    "webdriver_manager",
+    "onnxscript>=0.7.0",
+    "rapidfuzz>=3.14.5",
+    "onnxruntime>=1.25.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.11",
+    "radon",
+    "basedpyright",
+    "pytest>=8.3",
+]
+trackio = [
+    "trackio>=0.1",
+]
+export = [
+    "onnx>=1.21.0",
+    "onnxruntime>=1.22",
+    "onnxsim",
+    "onnxscript",
+]
+
+[project.scripts]
+redstar-plate-ocr = "redstar_plate_ocr.presentation.cli:app"
+
+[project.urls]
+Repository = "https://github.com/alsbi/RedStarPlateOCR"
+
+[tool.ruff]
+line-length = 79
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = [
+    "ignore:from_dynamic_axes_to_dynamic_shapes is deprecated:DeprecationWarning:torch.onnx._internal.exporter._compat",
+    "ignore:`isinstance\\(treespec, LeafSpec\\)` is deprecated:FutureWarning:copyreg",
+]
+
+[tool.basedpyright]
+pythonVersion = "3.13"
+pythonPlatform = "All"
+typeCheckingMode = "standard"
+include = ["src"]
+exclude = [".venv"]
+reportMissingTypeStubs = false
+reportPrivateImportUsage = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnknownParameterType = false
+reportAny = false
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "bandit>=1.9.4",
+    "basedpyright",
+    "pip-audit>=2.10.0",
+    "pytest>=8.3",
+    "pytest-timeout>=2.4.0",
+    "radon>=6.0.1",
+    "ruff>=0.11",
+]
+export = [
+    "onnx>=1.21.0",
+    "onnxruntime>=1.22",
+    "onnxscript>=0.7.0",
+    "onnxsim",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/redstar_plate_ocr"]
