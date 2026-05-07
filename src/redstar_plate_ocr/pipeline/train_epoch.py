@@ -252,6 +252,8 @@ def _update_running_loss(
     running["ctc"] = loss_dict["ctc"].item()
     running["country"] = loss_dict["country"].item()
     running["format"] = loss_dict["format"].item()
+    if "order" in loss_dict:
+        running["order"] = loss_dict["order"].item()
 
 
 def _compute_final_accuracies(

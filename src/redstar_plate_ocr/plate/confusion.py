@@ -173,6 +173,146 @@ def _correct_against_pattern(
     return "".join(result), fixes
 
 
+def _check_pattern_perfect(
+    text: str,
+    pattern: str,
+    letters_fs: frozenset[str],
+    digits_fs: frozenset[str],
+) -> bool:
+    """Check if text matches pattern with zero corrections."""
+    _, fixes = _correct_against_pattern(
+        text, pattern, letters_fs, digits_fs,
+    )
+    return fixes == 0
+
+
+def adjacent_swap_correct(
+    text: str,
+    patterns: list[str],
+    valid_letters: str,
+    valid_digits: str,
+    ctc_logits: "object | None" = None,
+    ctc_alignment: list[int] | None = None,
+    alphabet: str = "",
+    text_confidence: float = 1.0,
+    swap_confidence_threshold: float = 0.95,
+    swap_margin: float = 0.3,
+) -> str:
+    """Fix adjacent-same-type transposition errors using CTC logit evidence.
+
+    When the model swaps two adjacent characters of the same type
+    (e.g. ``CX`` → ``XC`` on an ``XX`` pattern), the confusion
+    corrector cannot help because both characters are valid at
+    either position.
+
+    This function inspects the CTC logits: for each adjacent pair
+    of same-type characters ``(a, b)`` decoded at timesteps
+    ``(t₁, t₂)``, it compares:
+
+    - **current score**: ``logits[t₁, a_idx] + logits[t₂, b_idx]``
+    - **swapped score**: ``logits[t₁, b_idx] + logits[t₂, a_idx]``
+
+    A swap is applied **only** when **all** of the following hold:
+
+    1. The model's overall confidence is below
+       *swap_confidence_threshold* (the model is uncertain).
+    2. The swapped score exceeds the current score by at
+       least *swap_margin* (logit-based evidence is strong).
+    3. Both characters belong to the same type (letter-letter
+       or digit-digit) — cross-type swaps are handled by
+       the confusion corrector instead.
+
+    When ``ctc_logits`` or ``ctc_alignment`` is not available,
+    the function returns *text* unchanged (safe fallback).
+
+    Args:
+        text: Plate text (typically after confusion correction).
+        patterns: Region patterns (used to restrict swaps to
+            same-type adjacent pairs only).
+        valid_letters: Valid letter characters.
+        valid_digits: Valid digit characters.
+        ctc_logits: CTC log-probability tensor ``(T, V)``.
+        ctc_alignment: Timestep index for each character in *text*.
+        alphabet: Alphabet string (letters + digits) matching the
+            CTC vocabulary order.
+        text_confidence: Overall recognition confidence (0–1).
+            Swap correction is skipped when the model is highly
+            confident — no point fixing what isn't broken.
+        swap_confidence_threshold: Maximum text_confidence at which
+            swap correction is attempted.  Default 0.95 means
+            "only try swaps when confidence < 95%".
+        swap_margin: Minimum logit advantage for the swapped
+            ordering over the current one.  Prevents swaps driven
+            by negligible noise.
+
+    Returns:
+        Corrected text if logit evidence supports a swap, else
+        the original text.
+    """
+    if len(text) < 2 or not patterns:
+        return text
+    if ctc_logits is None or ctc_alignment is None or not alphabet:
+        return text
+    if len(ctc_alignment) != len(text):
+        return text
+    # Don't touch high-confidence predictions — the model is sure.
+    if text_confidence >= swap_confidence_threshold:
+        return text
+
+    import torch
+
+    if not isinstance(ctc_logits, torch.Tensor):
+        return text
+
+    # Filter to alphabetic letters only — valid_letters may include
+    # separators like '-' that should NOT participate in same-type
+    # swap logic (they are literals, not true letters).
+    letters_fs = frozenset(c for c in valid_letters if c.isalpha())
+    digits_fs = frozenset(valid_digits)
+    result = list(text)
+    result_alignment = list(ctc_alignment)
+
+    i = 0
+    while i < len(result) - 1:
+        a, b = result[i], result[i + 1]
+        # Only swap same-type pairs (letter-letter or digit-digit)
+        both_letters = a in letters_fs and b in letters_fs
+        both_digits = a in digits_fs and b in digits_fs
+        if not (both_letters or both_digits):
+            i += 1
+            continue
+        if a == b:
+            i += 1
+            continue  # swapping identical chars is pointless
+
+        t1 = result_alignment[i]
+        t2 = result_alignment[i + 1]
+        a_idx = alphabet.index(a) if a in alphabet else -1
+        b_idx = alphabet.index(b) if b in alphabet else -1
+        if a_idx < 0 or b_idx < 0:
+            i += 1
+            continue
+
+        # Current: char a at t1, char b at t2
+        current_score = (
+            ctc_logits[t1, a_idx].item() + ctc_logits[t2, b_idx].item()
+        )
+        # Swapped: char b at t1, char a at t2
+        swapped_score = (
+            ctc_logits[t1, b_idx].item() + ctc_logits[t2, a_idx].item()
+        )
+
+        if swapped_score > current_score + swap_margin:
+            # Model's own logits significantly prefer the swapped order
+            result[i], result[i + 1] = b, a
+            # Keep alignment as-is (timesteps stay with positions)
+            i += 2  # skip past the swapped pair
+        else:
+            i += 1
+
+    return "".join(result)
+
+
 def _handle_slot(
     text: str,
     ti: int,

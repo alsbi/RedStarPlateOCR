@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from redstar_plate_ocr.plate.config import PlateConfig
-from redstar_plate_ocr.plate.confusion import correct_confusions
+from redstar_plate_ocr.plate.confusion import adjacent_swap_correct, correct_confusions
 from redstar_plate_ocr.plate.forbidden import ForbiddenFilter
 from redstar_plate_ocr.plate.pattern import PatternValidator
 from redstar_plate_ocr.plate.results import RawResult, RecognitionResult
@@ -12,14 +12,20 @@ from redstar_plate_ocr.plate.results import RawResult, RecognitionResult
 class PostProcessor:
     """Apply domain post-processing to raw recognition results.
 
-    Steps: forbidden filter -> pattern validation.
+    Steps: confusion correction → adjacent-swap correction
+    → forbidden filter → pattern validation.
+
+    The adjacent-swap step is controlled by *enable_swap_correction*
+    and requires CTC logits + alignment from RawResult.
     """
 
     def __init__(
         self,
         plate_config: PlateConfig,
+        enable_swap_correction: bool = True,
     ) -> None:
         self.plate_config = plate_config
+        self.enable_swap_correction = enable_swap_correction
         self._filter_cache: dict[str, ForbiddenFilter] = {}
         self._validator_cache: dict[
             tuple[str, str, str], PatternValidator
@@ -32,7 +38,7 @@ class PostProcessor:
     ) -> RecognitionResult:
         """Apply post-processing to raw result.
 
-        Pipeline: confusion correction → forbidden filter → pattern validation.
+        Pipeline: confusion → swap → forbidden → pattern.
 
         Args:
             raw: Raw recognition result.
@@ -57,12 +63,27 @@ class PostProcessor:
                 region.valid_chars.digits,
             )
 
-        # Step 2: forbidden filter
+        # Step 2: adjacent-swap correction (fix CX→XC etc.)
+        # Only when enabled AND logits/alignment are available AND
+        # the model is not highly confident (uncertainty-driven).
+        if self.enable_swap_correction and region is not None:
+            text = adjacent_swap_correct(
+                text,
+                region.get_patterns(),
+                region.valid_chars.letters,
+                region.valid_chars.digits,
+                ctc_logits=raw.ctc_logits,
+                ctc_alignment=raw.ctc_alignment,
+                alphabet=self.plate_config.union_alphabet,
+                text_confidence=raw.text_confidence,
+            )
+
+        # Step 3: forbidden filter
         text, needs_review = self._apply_forbidden(
             text, needs_review, country, region, hypotheses,
         )
 
-        # Step 3: pattern validation
+        # Step 4: pattern validation
         if region is not None:
             text, needs_review = self._apply_pattern_validation(
                 text, needs_review, region,

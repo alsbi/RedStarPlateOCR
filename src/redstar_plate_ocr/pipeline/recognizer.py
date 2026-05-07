@@ -12,7 +12,10 @@ from redstar_plate_ocr.nn.mask_table import MASK_VALUE
 from redstar_plate_ocr.pipeline.preprocess import PreprocessPipeline
 from redstar_plate_ocr.pipeline.utils import softmax
 from redstar_plate_ocr.plate.config import PlateConfig
-from redstar_plate_ocr.plate.postprocess import BeamSearchDecoder
+from redstar_plate_ocr.plate.postprocess import (
+    BeamSearchDecoder,
+    greedy_decode_with_alignment,
+)
 from redstar_plate_ocr.plate.postprocessor import PostProcessor
 from redstar_plate_ocr.plate.results import RawResult, RecognitionResult
 
@@ -133,7 +136,13 @@ class _BaseRecognizer:
         country = country_list[ctry_idx]
 
         decoder = self._get_decoder(country)
-        text, text_conf = decoder.decode(output.ctc_tensor)
+
+        # Greedy decode with alignment for adjacent-swap correction
+        alphabet = self.plate_config.union_alphabet
+        text, text_conf, alignment = greedy_decode_with_alignment(
+            output.ctc_tensor, alphabet,
+        )
+
         hypotheses = decoder.decode_n(
             output.ctc_tensor,
             n=max(self.beam_width, 1),
@@ -146,6 +155,8 @@ class _BaseRecognizer:
             country_confidence=ctry_conf,
             plate_type=plate_type,
             needs_review=needs_review,
+            ctc_alignment=alignment,
+            ctc_logits=output.ctc_tensor,
         )
         return raw, hypotheses
 

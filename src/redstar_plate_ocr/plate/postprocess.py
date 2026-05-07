@@ -81,12 +81,59 @@ def greedy_decode_with_conf(
         (text, confidence) — best hypothesis with geometric
         mean confidence.
     """
+    text, conf, _alignment = greedy_decode_with_alignment(logits, alphabet)
+    return text, conf
+
+
+def greedy_decode_with_alignment(
+    logits: Tensor,
+    alphabet: str,
+) -> tuple[str, float, list[int]]:
+    """CTC greedy decode returning per-character timestep alignment.
+
+    Args:
+        logits: (T, alphabet_size) LOG-PROBABILITIES
+            (already log_softmax'd).
+        alphabet: character set string.
+
+    Returns:
+        (text, confidence, alignment) — decoded text, geometric
+        mean confidence, and a list of timestep indices — one per
+        character in *text*, indicating the CTC timestep where
+        that character was first emitted.
+    """
     blank_idx = len(alphabet)
     probs = logits.exp()
     max_probs, indices = probs.max(dim=1)
-    if not indices.is_cpu:
-        return _decode_gpu(indices, max_probs, blank_idx, alphabet)
-    return _decode_cpu(indices, max_probs, blank_idx, alphabet)
+
+    # Collapse CTC: remove blanks + repeated chars
+    idx_np = indices.cpu().numpy()
+    prob_np = max_probs.cpu().numpy()
+    T = len(idx_np)
+
+    non_blank = idx_np != blank_idx
+    shifted = np.empty_like(idx_np)
+    shifted[0] = -1
+    shifted[1:] = idx_np[:-1]
+    keep = non_blank & (idx_np != shifted)
+
+    chars_idx = idx_np[keep]
+    used_probs = prob_np[keep]
+    timesteps = np.arange(T)[keep]  # which timestep each kept entry came from
+
+    valid = chars_idx < len(alphabet)
+    chars_idx = chars_idx[valid]
+    used_probs = used_probs[valid]
+    timesteps = timesteps[valid]
+
+    text = "".join(alphabet[i] for i in chars_idx.tolist())
+    alignment = timesteps.tolist()
+
+    if len(used_probs) == 0:
+        return text, 1.0, alignment
+
+    conf = _compute_confidence(used_probs.tolist())
+    return text, conf, alignment
 
 
 def _alphabet_indices_for(

@@ -21,6 +21,7 @@ from redstar_plate_ocr.nn.mask_table import (
     build_mask_table,
     build_positional_mask_table,
 )
+from redstar_plate_ocr.nn.positional import SinusoidalPositionalEncoding
 from redstar_plate_ocr.nn.types import ModelOutput
 from redstar_plate_ocr.plate.config import PlateConfig
 
@@ -185,9 +186,23 @@ class PlateOCRModel(nn.Module):
         canvas_height: int,
         canvas_width: int,
     ) -> None:
-        """Initialize BiLSTM, mask tables, and ramp parameters."""
+        """Initialize BiLSTM, positional encoding, mask tables, and ramp."""
         lc = lstm_cfg or {}
-        self.bilstm = PlateBiLSTM(**lc)
+        # Extract positional-encoding params before passing lc to BiLSTM
+        lstm_input_size = lc.get("input_size", 256)
+        pe_dropout = lc.get("positional_dropout", 0.0)
+        lstm_kwargs = {k: v for k, v in lc.items()
+                       if k not in ("positional_dropout",)}
+        self.bilstm = PlateBiLSTM(**lstm_kwargs)
+
+        # Sinusoidal positional encoding — gives the LSTM an explicit
+        # absolute-position signal so it can distinguish horizontal
+        # order of adjacent same-type characters (e.g. CX vs XC).
+        self.pos_encoding = SinusoidalPositionalEncoding(
+            d_model=lstm_input_size,
+            max_len=max(canvas_width, canvas_height) // 2 * 2,
+            dropout=pe_dropout,
+        )
 
         flat_mask, pos_mask = self._build_mask_tables(
             classification_cfg,
@@ -478,7 +493,12 @@ class PlateOCRModel(nn.Module):
         compressed_sq: Tensor | None,
         sq_mask: Tensor,
     ) -> Tensor:
-        """Run LSTM on standard and square paths separately."""
+        """Run LSTM on standard and square paths separately.
+
+        Sinusoidal positional encoding is added to each compressed
+        sequence *before* the BiLSTM so the model has an explicit
+        absolute-position signal.
+        """
         std_mask = ~sq_mask
         lstm_hidden = self.bilstm.hidden_size
         batch_size = sq_mask.shape[0]
@@ -491,11 +511,13 @@ class PlateOCRModel(nn.Module):
         )
         if std_mask.any():
             assert compressed_std is not None
-            std_lstm = self.bilstm(compressed_std[std_mask])
+            pe_std = self.pos_encoding(compressed_std[std_mask])
+            std_lstm = self.bilstm(pe_std)
             lstm_out[std_mask, : compressed_std.shape[1], :] = std_lstm
         if sq_mask.any():
             assert compressed_sq is not None
-            sq_lstm = self.bilstm(compressed_sq[sq_mask])
+            pe_sq = self.pos_encoding(compressed_sq[sq_mask])
+            sq_lstm = self.bilstm(pe_sq)
             lstm_out[sq_mask] = sq_lstm
         return lstm_out
 

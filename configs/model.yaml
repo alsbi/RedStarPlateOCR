@@ -50,6 +50,7 @@ lstm:
   num_layers: 2
   bidirectional: true
   dropout: 0.1
+  positional_dropout: 0.0
 
 ctc:
   loss_weight: 1.2
@@ -86,6 +87,8 @@ training:
   synergy_weight: 0.3
   country_grad_scale: 5.0
   char_aux_weight: 0.45
+  order_weight: 0.3
+  order_margin: 1.0
   scheduled_sampling_max_prob: 0.5
   scheduled_sampling_ramp_epochs: 5
   square_oversample_ratio: 0.3

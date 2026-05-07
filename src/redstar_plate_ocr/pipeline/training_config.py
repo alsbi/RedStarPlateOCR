@@ -56,6 +56,10 @@ class TrainingConfig:
     # Character-level auxiliary loss
     char_aux_weight: float = 0.3
 
+    # Order-penalty loss (adjacent same-type character order)
+    order_weight: float = 0.0
+    order_margin: float = 1.0
+
     # Loss weights
     format_weight: float = 1.0
     country_weight: float = 1.5
@@ -103,6 +107,8 @@ class TrainingConfig:
             use_amp=training.get("use_amp", True),
             synergy_weight=training.get("synergy_weight", 0.0),
             char_aux_weight=training.get("char_aux_weight", 0.3),
+            order_weight=training.get("order_weight", 0.0),
+            order_margin=training.get("order_margin", 1.0),
             format_weight=training.get("format_weight", 1.0),
             country_weight=training.get("country_weight", 1.5),
             ctc_weight=training.get("ctc_weight", 1.2),

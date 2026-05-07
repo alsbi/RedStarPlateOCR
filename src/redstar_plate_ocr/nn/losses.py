@@ -68,7 +68,7 @@ def text_to_indices(
 
 
 class CombinedLoss(nn.Module):
-    """Combined loss: α·L_fmt + β·L_ctry + γ·L_ctc − δ·synergy."""
+    """Combined loss: α·L_fmt + β·L_ctry + γ·L_ctc + ε·L_order − δ·synergy."""
 
     def __init__(
         self,
@@ -80,6 +80,8 @@ class CombinedLoss(nn.Module):
         country_label_smoothing: float = 0.1,
         synergy_weight: float = 0.0,
         char_aux_weight: float = 0.0,
+        order_weight: float = 0.0,
+        order_margin: float = 1.0,
     ):
         super().__init__()
         self.plate_config = plate_config
@@ -88,6 +90,8 @@ class CombinedLoss(nn.Module):
         self.ctc_weight = ctc_weight
         self.synergy_weight = synergy_weight
         self.char_aux_weight = char_aux_weight
+        self.order_weight = order_weight
+        self.order_margin = order_margin
         self.format_loss = nn.CrossEntropyLoss()
         self.country_loss = nn.CrossEntropyLoss(
             label_smoothing=country_label_smoothing
@@ -96,6 +100,26 @@ class CombinedLoss(nn.Module):
         self._char_to_idx: dict[str, int] = {
             c: i for i, c in enumerate(plate_config.union_alphabet)
         }
+        # Pre-compute same-type lookup for order penalty
+        union = plate_config.union_alphabet
+        digits_set = set("0123456789")
+        # Build a true letters set — only alphabetic characters.
+        # valid_chars.letters may contain '-' or other separators
+        # that are *not* real letters; pairing them with letters
+        # should NOT trigger the order penalty.
+        letters_set: set[str] = set()
+        for rc in plate_config.regions.values():
+            for c in rc.valid_chars.letters:
+                if c.isalpha():
+                    letters_set.add(c)
+        self._same_type_pairs: dict[tuple[str, str], bool] = {}
+        for i, c1 in enumerate(union):
+            for c2 in union:
+                if c1 == c2:
+                    continue
+                both_digits = c1 in digits_set and c2 in digits_set
+                both_letters = c1 in letters_set and c2 in letters_set
+                self._same_type_pairs[(c1, c2)] = both_digits or both_letters
 
     def forward(
         self,
@@ -123,6 +147,12 @@ class CombinedLoss(nn.Module):
             gt_texts,
         )
 
+        l_order = self._compute_order_penalty(
+            model_output.ctc_output,
+            gt_texts,
+            input_lengths,
+        )
+
         weighted_sum = (
             self.format_weight * l_fmt
             + self.country_weight * l_ctry
@@ -130,6 +160,8 @@ class CombinedLoss(nn.Module):
         )
         if l_char_aux is not None:
             weighted_sum = weighted_sum + self.char_aux_weight * l_char_aux
+        if self.order_weight > 0:
+            weighted_sum = weighted_sum + self.order_weight * l_order
 
         if self.synergy_weight > 0:
             bonus = self.synergy_weight * self._compute_synergy_bonus(
@@ -151,6 +183,7 @@ class CombinedLoss(nn.Module):
             "format": l_fmt,
             "country": l_ctry,
             "ctc": l_ctc,
+            "order": l_order,
             "synergy": bonus,
         }
         if l_char_aux is not None:
@@ -310,3 +343,102 @@ class CombinedLoss(nn.Module):
         if not losses:
             return None
         return torch.stack(losses).mean()
+
+    def _compute_order_penalty(
+        self,
+        ctc_output: Tensor,
+        gt_texts: list[str],
+        input_lengths: Tensor,
+    ) -> Tensor:
+        """Penalise wrong temporal order of adjacent same-type characters.
+
+        For every pair of adjacent characters ``(a, c_next)`` in a GT
+        text where both are the same type (both letters or both
+        digits), compute the soft expected timestep of each
+        character's emission and check the left-to-right order.
+
+        The **soft peak** is the probability-weighted average
+        timestep:
+
+            soft_peak(c) = Σ_t  softmax(log_probs[:, c])[t] · t
+
+        This is fully differentiable — gradients flow back through
+        the softmax to the CTC log-probabilities, allowing the
+        model to learn correct temporal ordering.
+
+        Correct order: character ``a`` (earlier in the text) should
+        peak at an earlier timestep than ``c_next`` (later in the
+        text), i.e. ``soft_peak_a < soft_peak_c``.  When reversed,
+        a penalty proportional to the violation is applied:
+
+            penalty += ReLU(soft_peak_a - soft_peak_c - margin)
+
+        The *margin* parameter (default 1) allows small timestep
+        overlaps without penalty — CTC alignments are not pixel-
+        perfect and a 1-step tolerance is reasonable.
+
+        Returns 0.0 tensor when ``order_weight`` is 0 or no
+        same-type pairs exist in the batch.
+        """
+        if self.order_weight <= 0:
+            return torch.tensor(0.0, device=ctc_output.device)
+
+        char_to_idx = self._char_to_idx
+        margin = self.order_margin
+
+        penalties: list[Tensor] = []
+        B = ctc_output.shape[0]
+
+        for b in range(B):
+            text = gt_texts[b]
+            T = input_lengths[b].item()
+            sample_logits = ctc_output[b, :T]  # (T, V)
+
+            # Timestep indices as a tensor for soft peak computation
+            t_range = torch.arange(
+                T, dtype=torch.float32, device=ctc_output.device
+            )
+
+            sample_penalty = torch.tensor(
+                0.0, device=ctc_output.device
+            )
+            count = 0
+
+            for k in range(len(text) - 1):
+                a, c_next = text[k], text[k + 1]
+                # Only penalise same-type adjacent pairs
+                if not self._same_type_pairs.get((a, c_next), False):
+                    continue
+
+                a_idx = char_to_idx.get(a)
+                c_idx = char_to_idx.get(c_next)
+                if a_idx is None or c_idx is None:
+                    continue
+
+                # Soft peak: probability-weighted average timestep.
+                # softmax over T dimension gives a probability
+                # distribution over timesteps for each character.
+                probs_a = torch.softmax(sample_logits[:, a_idx], dim=0)
+                probs_c = torch.softmax(sample_logits[:, c_idx], dim=0)
+                soft_peak_a = (probs_a * t_range).sum()
+                soft_peak_c = (probs_c * t_range).sum()
+
+                # Penalty: a (earlier in text) should peak at an
+                # earlier timestep than c_next.  Correct order:
+                # soft_peak_a < soft_peak_c.  When reversed the
+                # model emits the later character first.
+                diff = soft_peak_a - soft_peak_c  # positive = wrong
+                # ReLU with margin: small violations are tolerated
+                penalty = torch.clamp(diff - margin, min=0.0)
+                sample_penalty = sample_penalty + penalty
+                count += 1
+
+            if count > 0:
+                sample_penalty = sample_penalty / count
+            penalties.append(sample_penalty)
+
+        if not penalties:
+            return torch.tensor(0.0, device=ctc_output.device)
+
+        batch_penalty = torch.stack(penalties).mean()
+        return batch_penalty

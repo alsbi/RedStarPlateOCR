@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
+    from torch import Tensor
 
 
 @dataclass(frozen=True)
@@ -15,6 +20,12 @@ class RawResult:
     country_confidence: float
     plate_type: str
     needs_review: bool = False
+    # CTC alignment: timestep index for each character in *text*.
+    # None when not available (e.g. beam search decode).
+    ctc_alignment: list[int] | None = None
+    # CTC log-probabilities (T, V) tensor — needed for
+    # logit-based adjacent-swap correction.
+    ctc_logits: "Tensor | None" = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)

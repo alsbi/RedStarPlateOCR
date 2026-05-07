@@ -159,6 +159,8 @@ class Trainer:
             ctc_weight=self.config.ctc_weight,
             synergy_weight=self.config.synergy_weight,
             char_aux_weight=self.config.char_aux_weight,
+            order_weight=self.config.order_weight,
+            order_margin=self.config.order_margin,
         )
         self.evaluator = Evaluator(
             plate_config, self.device, beam_width=1,
