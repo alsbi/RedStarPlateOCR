@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 import albumentations as A
 import cv2
+import numpy as np
 
 
 def build_single_augmentation(
@@ -89,6 +90,7 @@ def _build_transforms(
         "coarse_dropout": _build_coarse_dropout,
         "dirt_spots": _build_dirt_spots,
         "defocus_blur": _build_defocus_blur,
+        "infrared_glow": _build_infrared_glow,
     }
     geometric_builders = {
         "rotation": _build_rotation,
@@ -300,6 +302,85 @@ def _build_defocus_blur(
     except AttributeError:
         # Older albumentations version without Defocus
         return None
+
+
+def _infrared_glow_transform(
+    image: np.ndarray,
+    tint_strength: float = 0.3,
+    contrast_boost: float = 1.4,
+    glow_sigma: int = 3,
+) -> np.ndarray:
+    """Apply infrared-glow effect to an image.
+
+    Simulates a plate captured under IR illumination:
+    dark background, bright glowing characters with a
+    subtle greenish/magenta IR tint.
+
+    Steps:
+        1. Invert (dark bg → bright, bright chars → dark)
+        2. Boost contrast so characters appear to "glow"
+        3. Add IR-colour tint (randomly greenish or magenta)
+        4. Optional glow halo via Gaussian blur compositing
+    """
+    # 1. Invert
+    inv = 255 - image
+
+    # 2. Boost contrast
+    inv = np.clip(
+        (inv.astype(np.float32) - 128) * contrast_boost + 128,
+        0,
+        255,
+    ).astype(np.uint8)
+
+    # 3. IR tint — greenish or magenta shift
+    tinted = inv.astype(np.float32)
+    if random.random() < 0.5:
+        # Greenish IR tint (common with IR LEDs)
+        tinted[:, :, 1] *= 1.0 + tint_strength   # green ↑
+        tinted[:, :, 0] *= 1.0 - tint_strength * 0.5  # red ↓
+        tinted[:, :, 2] *= 1.0 - tint_strength * 0.3  # blue ↓
+    else:
+        # Magenta/reddish IR tint (IR camera sensor bleed)
+        tinted[:, :, 0] *= 1.0 + tint_strength * 0.6  # red ↑
+        tinted[:, :, 2] *= 1.0 + tint_strength * 0.4  # blue ↑
+        tinted[:, :, 1] *= 1.0 - tint_strength * 0.5  # green ↓
+    tinted = np.clip(tinted, 0, 255).astype(np.uint8)
+
+    # 4. Glow halo — blend blurred version for bloom effect
+    if glow_sigma > 0:
+        blurred = cv2.GaussianBlur(tinted, (0, 0), glow_sigma)
+        alpha = 0.35
+        result = cv2.addWeighted(tinted, 1 - alpha, blurred, alpha, 0)
+    else:
+        result = tinted
+
+    return result
+
+
+def _build_infrared_glow(
+    cfg: dict,
+) -> A.Lambda | None:
+    """infrared_glow → A.Lambda wrapping _infrared_glow_transform.
+
+    Config keys:
+        tint_strength: 0.0–1.0, intensity of IR colour shift
+        contrast_boost: 1.0–2.0, how much to amplify contrast
+        glow_sigma: 0–7, Gaussian sigma for bloom halo (0 = no glow)
+        p: probability of applying
+    """
+    tint_strength = cfg.get("tint_strength", 0.3)
+    contrast_boost = cfg.get("contrast_boost", 1.4)
+    glow_sigma = cfg.get("glow_sigma", 3)
+
+    def _apply(image: np.ndarray, **kwargs: Any) -> np.ndarray:
+        return _infrared_glow_transform(
+            image,
+            tint_strength=tint_strength,
+            contrast_boost=contrast_boost,
+            glow_sigma=glow_sigma,
+        )
+
+    return A.Lambda(image=_apply, name="infrared_glow", p=cfg.get("p", 0.5))
 
 
 def _build_affine(

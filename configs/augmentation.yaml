@@ -29,6 +29,16 @@ coarse_dropout:
   max_width: 6
   p: 0.15
 
+infrared_glow:
+  enabled: true
+  # IR colour shift intensity (0.0 = no tint, 1.0 = strong)
+  tint_strength: 0.3
+  # Contrast amplification (1.0 = no boost)
+  contrast_boost: 1.4
+  # Gaussian sigma for bloom/glow halo (0 = disabled)
+  glow_sigma: 3
+  p: 0.2
+
 # Geometric transforms
 rotation:
   enabled: true
