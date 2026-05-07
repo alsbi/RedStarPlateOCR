@@ -21,7 +21,6 @@ from redstar_plate_ocr.data.augmentation import (
 )
 from redstar_plate_ocr.data.dataloader import build_dataloader
 from redstar_plate_ocr.data.dataset import PlateDataset
-from redstar_plate_ocr.pipeline.preprocess import PreprocessPipeline
 from redstar_plate_ocr.nn.losses import CombinedLoss
 from redstar_plate_ocr.nn.model import PlateOCRModel
 from redstar_plate_ocr.pipeline.checkpoint import (
@@ -29,6 +28,7 @@ from redstar_plate_ocr.pipeline.checkpoint import (
     save_checkpoint,
 )
 from redstar_plate_ocr.pipeline.evaluator import Evaluator
+from redstar_plate_ocr.pipeline.preprocess import PreprocessPipeline
 from redstar_plate_ocr.pipeline.process_epoch import (
     _EpochResult,
     process_epoch,

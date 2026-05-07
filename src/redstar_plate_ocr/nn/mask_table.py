@@ -4,7 +4,7 @@ import torch
 
 from redstar_plate_ocr.plate.config import PlateConfig
 
-MASK_VALUE: float = -15.0
+MASK_VALUE: float = -3.0
 
 
 def _char_allowed(
@@ -15,7 +15,8 @@ def _char_allowed(
     dispatch = {
         "X": region_letters,
         "0": region_digits,
-        "o": region_letters | region_digits,
+        "x": region_letters,
+        "o": region_digits,
         "-": {"-"},
     }
     return dispatch.get(ch, set())
@@ -52,8 +53,15 @@ def build_positional_mask_table(
     Pattern characters:
         X → letters allowed, digits forbidden
         0 → digits allowed, letters forbidden
-        o → both letters and digits allowed
+        x → letters allowed (optional, same mask as X)
+        o → digits allowed (optional, same mask as 0)
         - → hyphen allowed
+
+    Optional slots (x, o) receive the same positional mask as
+    their mandatory counterparts (X, 0).  The "optional" nature
+    is handled downstream by CTC (the model may emit blank
+    instead of a character) and by post-processing validation
+    (PatternValidator skips optional positions that don't match).
 
     For countries with multiple patterns: union of allowed
     characters across all patterns per position.

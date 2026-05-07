@@ -14,8 +14,8 @@ def test_full_mask_standard_returns_seq_len():
     mask = torch.ones(2, 1, 20, 48)
     result = comp.compute_input_lengths(mask, ["standard", "standard"])
     assert result.shape == (2,)
-    assert result[0].item() == 48
-    assert result[1].item() == 48
+    assert result[0].item() == 48 + 4  # +4 safety margin
+    assert result[1].item() == 48 + 4
 
 
 def test_half_mask_standard_returns_half():
@@ -24,7 +24,7 @@ def test_half_mask_standard_returns_half():
     mask = torch.zeros(1, 1, 20, 48)
     mask[0, 0, :, :24] = 1.0
     result = comp.compute_input_lengths(mask, ["standard"])
-    assert result[0].item() == 24
+    assert result[0].item() == 24 + 4  # +4 safety margin
 
 
 def test_square_type_top_w_plus_bot_w():
@@ -37,8 +37,8 @@ def test_square_type_top_w_plus_bot_w():
     # bot half: 6 cols filled
     mask[0, 0, 10:, :6] = 1.0
     result = comp.compute_input_lengths(mask, ["square"])
-    # feat_w(48) + bot_present(6) = 54
-    assert result[0].item() == 54
+    # feat_w(48) + bot_present(6) + safety_margin(4) = 58
+    assert result[0].item() == 58
 
 
 def test_clamp_min_2():
@@ -48,11 +48,11 @@ def test_clamp_min_2():
     # Только 1 колонка заполнена
     mask[0, 0, :, :1] = 1.0
     result = comp.compute_input_lengths(mask, ["standard"])
-    # Метод возвращает 1, clamp(min=2) применяется в train_epoch
-    assert result[0].item() == 1
-    # Проверяем clamp отдельно
+    # Метод возвращает 1+4=5 (1 col + margin), clamp(min=2) — в train_epoch
+    assert result[0].item() == 5
+    # clamp(min=2) → 5 already ≥ 2
     clamped = result.clamp(min=2, max=48)
-    assert clamped[0].item() == 2
+    assert clamped[0].item() == 5
 
 
 def test_clamp_max_seq_len():
@@ -60,7 +60,7 @@ def test_clamp_max_seq_len():
     comp = AdaptiveCompression(canvas_height=80, canvas_width=192, stride=4)
     mask = torch.ones(1, 1, 20, 48)
     result = comp.compute_input_lengths(mask, ["standard"])
-    assert result[0].item() == 48
+    assert result[0].item() == 48 + 4  # +4 safety margin
     # clamp(max=30) — имитация seq_len < feat_w
     clamped = result.clamp(min=2, max=30)
     assert clamped[0].item() == 30
@@ -79,8 +79,8 @@ def test_mixed_batch():
         mask,
         ["standard", "square"],
     )
-    assert result[0].item() == 30
-    assert result[1].item() == 63  # feat_w(48) + bot_present(15)
+    assert result[0].item() == 30 + 4  # +4 safety margin
+    assert result[1].item() == 63 + 4  # feat_w(48) + bot_present(15) + margin
 
 
 def test_square_partial_content_mask():
@@ -92,5 +92,5 @@ def test_square_partial_content_mask():
     # Bottom half: only 10 cols filled
     mask[0, 0, 10:, :10] = 1.0
     result = comp.compute_input_lengths(mask, ["square"])
-    # feat_w(48) + bot_present(10) = 58
-    assert result[0].item() == 58
+    # feat_w(48) + bot_present(10) + safety_margin(4) = 62
+    assert result[0].item() == 62

@@ -152,7 +152,9 @@ class TestAutoUnpad:
         canvas = np.full((256, 256, 3), 114, dtype=np.uint8)
         # Place a plate-like content in the center
         rng = np.random.RandomState(1)
-        canvas[100:156, :, :] = rng.randint(0, 255, (56, 256, 3), dtype=np.uint8)
+        canvas[100:156, :, :] = rng.randint(
+            0, 255, (56, 256, 3), dtype=np.uint8
+        )
         result = auto_unpad(canvas)
         assert result.shape == (56, 256, 3)
 
@@ -160,7 +162,9 @@ class TestAutoUnpad:
         """Works with any uniform pad color (e.g. white 255)."""
         canvas = np.full((200, 200, 3), 255, dtype=np.uint8)
         rng = np.random.RandomState(2)
-        canvas[40:80, 30:170, :] = rng.randint(0, 200, (40, 140, 3), dtype=np.uint8)
+        canvas[40:80, 30:170, :] = rng.randint(
+            0, 200, (40, 140, 3), dtype=np.uint8
+        )
         result = auto_unpad(canvas)
         assert result.shape[0] <= 80  # at most content height + small margins
         assert result.shape[1] <= 170
@@ -178,7 +182,9 @@ class TestAutoUnpad:
         """Works when padding is only on top/bottom (no left/right)."""
         canvas = np.full((200, 100, 3), 100, dtype=np.uint8)
         rng = np.random.RandomState(4)
-        canvas[50:150, :, :] = rng.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+        canvas[50:150, :, :] = rng.randint(
+            0, 255, (100, 100, 3), dtype=np.uint8
+        )
         result = auto_unpad(canvas)
         assert result.shape == (100, 100, 3)
 
@@ -211,18 +217,20 @@ class TestPreprocessWithAutoUnpad:
         assert w == 192
 
     def test_pre_canvased_image_stripped(self) -> None:
-        """Pre-canvased image is stripped and produces correct content_mask dims."""
+        """Pre-canvased image stripped with correct content_mask dims."""
         pipe = PreprocessPipeline()
         # Simulate dataset2-style image: 256x256 with gray 114 padding
         canvas = np.full((256, 256, 3), 114, dtype=np.uint8)
         rng = np.random.RandomState(11)
         # Place a plate-like rectangle
-        canvas[100:156, :, :] = rng.randint(0, 255, (56, 256, 3), dtype=np.uint8)
+        canvas[100:156, :, :] = rng.randint(
+            0, 255, (56, 256, 3), dtype=np.uint8
+        )
         tensor, h, w = pipe(canvas)
         assert tensor.shape == (3, 80, 192)
-        # After unpad: 56x256, scale=min(192/256, 80/56)=1.428 -> 80x366 -> clamped 80x192
-        # Actually scale = min(192/256, 80/56) = min(0.75, 1.428) = 0.75
-        # So 56*0.75=42, 256*0.75=192 -> scaled_h=42, scaled_w=192
+        # After unpad: 56x256, scale=min(192/256,80/56)
+        # = min(0.75, 1.428) = 0.75
+        # So 56*0.75=42, 256*0.75=192
         assert h == 42
         assert w == 192
 

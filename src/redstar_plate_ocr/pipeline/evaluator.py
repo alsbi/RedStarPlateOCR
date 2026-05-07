@@ -55,11 +55,17 @@ class Evaluator:
         union_alphabet = self.plate_config.union_alphabet
         preds: list[str] = []
         for i in range(bsz):
-            inp_len = int(input_lengths[i]) if input_lengths is not None else None
+            inp_len = (
+                int(input_lengths[i])
+                if input_lengths is not None
+                else None
+            )
             if self.beam_width > 1:
                 pred, _ = self._beam_decoder.decode(ctc[i])
             else:
-                pred = greedy_decode(ctc[i], union_alphabet, input_length=inp_len)
+                pred = greedy_decode(
+                    ctc[i], union_alphabet, input_length=inp_len
+                )
             preds.append(pred)
         return preds
 

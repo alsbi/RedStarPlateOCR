@@ -32,13 +32,13 @@ class TestBug11SquareInputLengths:
         mask[0, 0, :10, :20] = 1.0  # top half content
         mask[0, 0, 10:, :20] = 1.0  # bottom half content
         result = comp.compute_input_lengths(mask, ["square"])
-        # feat_w(48) + bot_present(20) = 68
-        assert result[0].item() == 48 + 20
+        # feat_w(48) + bot_present(20) + safety_margin(4) = 72
+        assert result[0].item() == 48 + 20 + 4
 
     def test_square_input_lengths_specific_value(
         self,
     ):
-        """Canvas 80x192, stride=4, square 80x80: input_length=68."""
+        """Canvas 80x192, stride=4, square 80x80: input_length=72."""
         comp = AdaptiveCompression(
             canvas_height=80,
             canvas_width=192,
@@ -51,8 +51,8 @@ class TestBug11SquareInputLengths:
         mask[0, 0, :10, :20] = 1.0
         mask[0, 0, 10:, :20] = 1.0
         result = comp.compute_input_lengths(mask, ["square"])
-        # feat_w(48) + bot_present(20) = 68
-        assert result[0].item() == 68
+        # feat_w(48) + bot_present(20) + safety_margin(4) = 72
+        assert result[0].item() == 72
 
     def test_standard_input_lengths_unchanged(
         self,
@@ -67,4 +67,5 @@ class TestBug11SquareInputLengths:
         mask = torch.zeros(1, 1, 20, 48)
         mask[0, 0, :, :30] = 1.0
         result = comp.compute_input_lengths(mask, ["standard"])
-        assert result[0].item() == 30
+        # col_present(30) + safety_margin(4) = 34
+        assert result[0].item() == 34

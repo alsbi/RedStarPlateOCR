@@ -145,3 +145,87 @@ class TestBeamSearchLogSpace:
         logits = torch.log_softmax(logits, dim=-1)
         _, conf = decoder.decode(logits)
         assert 0.0 <= conf <= 1.0
+
+
+class TestBeamSearchOptionalChars:
+    """Beam search with optional pattern characters (o, x)."""
+
+    def test_optional_digit_o_allows_digit(self) -> None:
+        """o: digit at optional position is allowed."""
+        alphabet = "AB012"
+        decoder = BeamSearchDecoder(
+            alphabet,
+            beam_width=5,
+            pattern="X0o",
+            valid_letters="AB",
+            valid_digits="012",
+        )
+        logits = torch.full((3, len(alphabet) + 1), -20.0)
+        logits[0, 0] = 0.0  # A at pos 0 (letter = OK)
+        logits[1, 2] = 0.0  # '0' at pos 1 (digit = OK)
+        logits[2, 3] = 0.0  # '1' at pos 2 (digit at 'o' = OK)
+        logits = torch.log_softmax(logits, dim=-1)
+        text, _ = decoder.decode(logits)
+        assert text == "A01"
+
+    def test_optional_digit_o_blocks_letter(self) -> None:
+        """o: letter at optional-digit position is blocked."""
+        alphabet = "AB012"
+        decoder = BeamSearchDecoder(
+            alphabet,
+            beam_width=5,
+            pattern="X0o",
+            valid_letters="AB",
+            valid_digits="012",
+        )
+        logits = torch.full((3, len(alphabet) + 1), -5.0)
+        logits[0, 0] = 5.0  # A at pos 0 (letter = OK)
+        logits[1, 2] = 5.0  # '0' at pos 1 (digit = OK)
+        logits[2, 0] = 5.0  # A at pos 2 (letter at 'o' = BLOCKED)
+        logits = torch.log_softmax(logits, dim=-1)
+        text, _ = decoder.decode(logits)
+        # Position 2 should not produce a letter
+        if len(text) >= 3:
+            assert text[2] not in "AB", (
+                f"Letter at 'o' position should be blocked, got '{text[2]}'"
+            )
+
+    def test_optional_letter_x_allows_letter(self) -> None:
+        """x: letter at optional position is allowed."""
+        alphabet = "AB012"
+        decoder = BeamSearchDecoder(
+            alphabet,
+            beam_width=5,
+            pattern="X0x",
+            valid_letters="AB",
+            valid_digits="012",
+        )
+        logits = torch.full((3, len(alphabet) + 1), -20.0)
+        logits[0, 0] = 0.0  # A at pos 0 (letter = OK)
+        logits[1, 2] = 0.0  # '0' at pos 1 (digit = OK)
+        logits[2, 1] = 0.0  # B at pos 2 (letter at 'x' = OK)
+        logits = torch.log_softmax(logits, dim=-1)
+        text, _ = decoder.decode(logits)
+        assert text == "A0B"
+
+    def test_optional_letter_x_blocks_digit(self) -> None:
+        """x: digit at optional-letter position is blocked."""
+        alphabet = "AB012"
+        decoder = BeamSearchDecoder(
+            alphabet,
+            beam_width=5,
+            pattern="X0x",
+            valid_letters="AB",
+            valid_digits="012",
+        )
+        logits = torch.full((3, len(alphabet) + 1), -5.0)
+        logits[0, 0] = 5.0  # A at pos 0 (letter = OK)
+        logits[1, 2] = 5.0  # '0' at pos 1 (digit = OK)
+        logits[2, 2] = 5.0  # '0' at pos 2 (digit at 'x' = BLOCKED)
+        logits = torch.log_softmax(logits, dim=-1)
+        text, _ = decoder.decode(logits)
+        # Position 2 should not produce a digit
+        if len(text) >= 3:
+            assert text[2] not in "012", (
+                f"Digit at 'x' position should be blocked, got '{text[2]}'"
+            )

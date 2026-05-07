@@ -114,9 +114,15 @@ class Exporter:
         if plate_config is None:
             plate_config = model.plate_config
 
-        dummy_images = torch.randn(1, 3, 80, 192, device=export_device)
-        dummy_orig_h = torch.tensor([80], dtype=torch.int64, device=export_device)
-        dummy_orig_w = torch.tensor([192], dtype=torch.int64, device=export_device)
+        dummy_images = torch.randn(
+            1, 3, 80, 192, device=export_device
+        )
+        dummy_orig_h = torch.tensor(
+            [80], dtype=torch.int64, device=export_device
+        )
+        dummy_orig_w = torch.tensor(
+            [192], dtype=torch.int64, device=export_device
+        )
 
         dynamic_axes = None
         if dynamic_batch:
@@ -174,7 +180,7 @@ class Exporter:
         plate_config: PlateConfig,
         preprocessing: dict | None = None,
     ) -> None:
-        """Embed plate_config YAML and preprocessing params into ONNX model metadata."""
+        """Embed plate config and preprocessing into ONNX metadata."""
         import json
 
         import onnx  # type: ignore[import-untyped]

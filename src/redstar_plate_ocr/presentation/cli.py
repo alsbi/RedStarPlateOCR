@@ -15,6 +15,7 @@ from rich.table import Table
 
 from redstar_plate_ocr.pipeline.dataset_validator import validate_dataset
 from redstar_plate_ocr.pipeline.utils import find_csv
+from redstar_plate_ocr.plate.config import PlateConfig
 from redstar_plate_ocr.presentation.config import (
     _load_plate_config,
     _model_kwargs_from_cfg,
@@ -33,7 +34,6 @@ from redstar_plate_ocr.presentation.logging import setup_logging
 if TYPE_CHECKING:
     from redstar_plate_ocr.nn.model import PlateOCRModel
     from redstar_plate_ocr.pipeline.trainer import Trainer
-    from redstar_plate_ocr.plate.config import PlateConfig
 
 app = typer.Typer(
     name="redstar-plate-ocr",
@@ -163,8 +163,8 @@ def evaluate(
     """Evaluate model on a dataset."""
 
     from redstar_plate_ocr.data.dataset import PlateDataset
-    from redstar_plate_ocr.pipeline.preprocess import PreprocessPipeline
     from redstar_plate_ocr.pipeline.evaluator import Evaluator
+    from redstar_plate_ocr.pipeline.preprocess import PreprocessPipeline
 
     setup_logging(verbose=_verbose_count)
 
@@ -328,7 +328,7 @@ def export(
     setup_logging(verbose=_verbose_count)
 
     model, _pc = _load_model_for_inference(config, plate_config, checkpoint)
-    preproc_params = _preprocess_params_from_config(config)
+    _preproc_params = _preprocess_params_from_config(config)
     # Build raw preprocessing config for embedding into ONNX metadata
     with open(config) as f:
         raw_cfg = yaml.safe_load(f)
@@ -437,7 +437,9 @@ def _preprocess_params_from_config(config: str) -> dict:
     normalization.mean, normalization.std) and returns a dict suitable
     for ``PreprocessPipeline(**params)``.
     """
-    from redstar_plate_ocr.pipeline.exporter import _preprocess_raw_to_pipeline_params
+    from redstar_plate_ocr.pipeline.exporter import (
+        _preprocess_raw_to_pipeline_params,
+    )
 
     with open(config) as f:
         cfg = yaml.safe_load(f)

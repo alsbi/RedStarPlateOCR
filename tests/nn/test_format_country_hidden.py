@@ -17,6 +17,15 @@ from redstar_plate_ocr.plate.config import PlateConfig
 # --- FormatHead ---
 
 
+def _make_mask(
+    orig_h: torch.Tensor, orig_w: torch.Tensor
+) -> torch.Tensor:
+    """Shortcut to compute content_mask with default feat params."""
+    return compute_content_mask(
+        orig_h, orig_w, feat_h=20, feat_w=48, stride=4
+    )
+
+
 def test_format_head_no_hidden_is_linear():
     """Default FormatHead uses single Linear layer (shape_enc + fc)."""
     head = FormatHead(in_channels=256)
@@ -45,8 +54,8 @@ def test_format_head_hidden_forward_shape():
     x = torch.randn(3, 256, 20, 48)
     orig_h = torch.tensor([80, 60, 80], dtype=torch.int64)
     orig_w = torch.tensor([192, 192, 192], dtype=torch.int64)
-    content_mask = compute_content_mask(orig_h, orig_w, feat_h=20, feat_w=48, stride=4)
-    out = head(x, content_mask=content_mask, orig_h=orig_h, orig_w=orig_w)
+    cmask = _make_mask(orig_h, orig_w)
+    out = head(x, content_mask=cmask, orig_h=orig_h, orig_w=orig_w)
     assert out.shape == (3, 2)
     assert torch.isfinite(out).all()
 
@@ -57,29 +66,33 @@ def test_format_head_no_hidden_forward_shape():
     x = torch.randn(3, 256, 20, 48)
     orig_h = torch.tensor([80, 60, 80], dtype=torch.int64)
     orig_w = torch.tensor([192, 192, 192], dtype=torch.int64)
-    content_mask = compute_content_mask(orig_h, orig_w, feat_h=20, feat_w=48, stride=4)
-    out = head(x, content_mask=content_mask, orig_h=orig_h, orig_w=orig_w)
+    cmask = _make_mask(orig_h, orig_w)
+    out = head(x, content_mask=cmask, orig_h=orig_h, orig_w=orig_w)
     assert out.shape == (3, 2)
 
 
 def test_format_head_ignores_visual_features():
-    """FormatHead output depends only on plate dims and shape, not on pixel values."""
+    """FormatHead output depends only on plate dims/shape, not pixels."""
     head = FormatHead(in_channels=256)
     head.eval()
     orig_h = torch.tensor([80, 60], dtype=torch.int64)
     orig_w = torch.tensor([192, 192], dtype=torch.int64)
-    content_mask = compute_content_mask(orig_h, orig_w, feat_h=20, feat_w=48, stride=4)
+    cmask = _make_mask(orig_h, orig_w)
 
     x1 = torch.randn(2, 256, 20, 48)
-    x2 = torch.randn(2, 256, 20, 48)  # completely different features
+    x2 = torch.randn(2, 256, 20, 48)  # different features
 
     with torch.no_grad():
-        out1 = head(x1, content_mask=content_mask, orig_h=orig_h, orig_w=orig_w)
-        out2 = head(x2, content_mask=content_mask, orig_h=orig_h, orig_w=orig_w)
+        out1 = head(
+            x1, content_mask=cmask, orig_h=orig_h, orig_w=orig_w
+        )
+        out2 = head(
+            x2, content_mask=cmask, orig_h=orig_h, orig_w=orig_w
+        )
 
     # Same shape/dims → same logits regardless of features
     assert torch.allclose(out1, out2, atol=1e-6), (
-        "FormatHead should depend only on plate shape/dims, not visual features"
+        "FormatHead should depend only on shape/dims"
     )
 
 
@@ -94,12 +107,18 @@ def test_format_head_different_dims_different_output():
     orig_h_sq = torch.tensor([80], dtype=torch.int64)
     orig_w_sq = torch.tensor([80], dtype=torch.int64)
 
-    mask_std = compute_content_mask(orig_h_std, orig_w_std, feat_h=20, feat_w=48, stride=4)
-    mask_sq = compute_content_mask(orig_h_sq, orig_w_sq, feat_h=20, feat_w=48, stride=4)
+    mask_std = _make_mask(orig_h_std, orig_w_std)
+    mask_sq = _make_mask(orig_h_sq, orig_w_sq)
 
     with torch.no_grad():
-        out_std = head(x, content_mask=mask_std, orig_h=orig_h_std, orig_w=orig_w_std)
-        out_sq = head(x, content_mask=mask_sq, orig_h=orig_h_sq, orig_w=orig_w_sq)
+        out_std = head(
+            x, content_mask=mask_std,
+            orig_h=orig_h_std, orig_w=orig_w_std,
+        )
+        out_sq = head(
+            x, content_mask=mask_sq,
+            orig_h=orig_h_sq, orig_w=orig_w_sq,
+        )
 
     assert not torch.allclose(out_std, out_sq, atol=1e-6), (
         "Different plate dimensions should produce different format logits"
@@ -107,7 +126,7 @@ def test_format_head_different_dims_different_output():
 
 
 def test_format_head_learns_standard_vs_square():
-    """FormatHead can learn to distinguish standard vs square from shape."""
+    """FormatHead can learn to distinguish standard vs square."""
     import torch.nn.functional as F
 
     head = FormatHead(in_channels=256, hidden_size=32)
@@ -118,21 +137,27 @@ def test_format_head_learns_standard_vs_square():
     orig_h = torch.tensor([80] * 8 + [80] * 8, dtype=torch.int64)
     orig_w = torch.tensor([192] * 8 + [80] * 8, dtype=torch.int64)
     labels = torch.tensor([0] * 8 + [1] * 8, dtype=torch.long)
-    content_mask = compute_content_mask(orig_h, orig_w, feat_h=20, feat_w=48, stride=4)
+    cmask = _make_mask(orig_h, orig_w)
     features = torch.randn(16, 256, 20, 48)
 
     for _ in range(50):
         optimizer.zero_grad()
-        logits = head(features, content_mask=content_mask, orig_h=orig_h, orig_w=orig_w)
+        logits = head(
+            features, content_mask=cmask,
+            orig_h=orig_h, orig_w=orig_w,
+        )
         F.cross_entropy(logits, labels).backward()
         optimizer.step()
 
     head.eval()
     with torch.no_grad():
-        logits = head(features, content_mask=content_mask, orig_h=orig_h, orig_w=orig_w)
+        logits = head(
+            features, content_mask=cmask,
+            orig_h=orig_h, orig_w=orig_w,
+        )
         preds = logits.argmax(1)
         assert (preds == labels).all(), (
-            f"FormatHead should learn standard=0, square=1; got {preds.tolist()}"
+            f"Should learn standard=0, square=1; got {preds.tolist()}"
         )
 
 

@@ -175,7 +175,7 @@ class TestPerSampleInputLengths:
         mask = torch.zeros(1, 1, 20, 48)
         mask[0, 0, :, :30] = 1.0
         result = comp.compute_input_lengths(mask, ["standard"])
-        assert result[0].item() == 30
+        assert result[0].item() == 30 + 4  # +4 safety margin
 
     def test_square_input_length_top_w_plus_bot_w(self):
         """Square sample: input_lengths = feat_w + bot_present."""
@@ -189,8 +189,8 @@ class TestPerSampleInputLengths:
         mask[0, 0, :10, :20] = 1.0
         mask[0, 0, 10:, :15] = 1.0
         result = comp.compute_input_lengths(mask, ["square"])
-        # feat_w(48) + bot_present(15) = 63
-        assert result[0].item() == 63
+        # feat_w(48) + bot_present(15) + safety_margin(4) = 67
+        assert result[0].item() == 67
 
     def test_mixed_batch_per_sample_lengths(self):
         """Mixed batch: each sample gets its own input_length."""
@@ -210,8 +210,8 @@ class TestPerSampleInputLengths:
             mask,
             ["standard", "square"],
         )
-        assert result[0].item() == 30
-        assert result[1].item() == 63
+        assert result[0].item() == 30 + 4  # +4 safety margin
+        assert result[1].item() == 63 + 4  # feat_w + bot_present + margin
 
 
 class TestGradientFlow:
@@ -261,6 +261,6 @@ class TestPerSampleInputLengthsExtra:
         mask[2, 0, 10:, :15] = 1.0  # square bot
         gt_plate_types = ["standard", "standard", "square"]
         result = comp.compute_input_lengths(mask, gt_plate_types)
-        assert result[0].item() == 30
-        assert result[1].item() == 25
-        assert result[2].item() == 63  # feat_w(48) + bot_present(15)
+        assert result[0].item() == 30 + 4  # +4 safety margin
+        assert result[1].item() == 25 + 4  # +4 safety margin
+        assert result[2].item() == 63 + 4  # feat_w + bot_present + margin

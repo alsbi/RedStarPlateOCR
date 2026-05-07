@@ -78,7 +78,6 @@ class AdaptiveCompression(nn.Module):
         """
         col_present = (content_mask[:, 0].sum(dim=1) > 0).sum(dim=1)
         mid = content_mask.shape[2] // 2
-        top_present = (content_mask[:, 0, :mid, :].sum(dim=1) > 0).sum(dim=1)
         bot_present = (content_mask[:, 0, mid:, :].sum(dim=1) > 0).sum(dim=1)
         # Square layout: [top_feat_w_cols | bot_feat_w_cols]
         # top occupies positions 0..feat_w-1, bot starts at feat_w.
@@ -89,6 +88,9 @@ class AdaptiveCompression(nn.Module):
             device=content_mask.device,
         )
         result = torch.where(is_sq, sq_lengths, col_present)
+        # Add a small safety margin so the last character's CTC
+        # emissions are not clipped during greedy_decode.
+        result = result + 4
         return result.clamp(min=1)
 
     def compute_content_mask(

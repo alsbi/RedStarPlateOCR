@@ -42,7 +42,9 @@ def _grid_pool(
         for j in range(grid_cols):
             region = x[:, :, i * rh : (i + 1) * rh, j * rw : (j + 1) * rw]
             if mask is not None:
-                region_mask = mask[:, :, i * rh : (i + 1) * rh, j * rw : (j + 1) * rw]
+                region_mask = mask[
+                    :, :, i * rh : (i + 1) * rh, j * rw : (j + 1) * rw
+                ]
                 pooled = _masked_pool_region(region, region_mask)
             else:
                 pooled = gap(region).flatten(1)

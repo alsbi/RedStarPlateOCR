@@ -8,8 +8,8 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from redstar_plate_ocr.pipeline.preprocess import PreprocessPipeline
 from redstar_plate_ocr.nn.mask_table import MASK_VALUE
+from redstar_plate_ocr.pipeline.preprocess import PreprocessPipeline
 from redstar_plate_ocr.pipeline.utils import softmax
 from redstar_plate_ocr.plate.config import PlateConfig
 from redstar_plate_ocr.plate.postprocess import BeamSearchDecoder

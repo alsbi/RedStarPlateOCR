@@ -60,7 +60,7 @@ ctc:
 
 unified_ctc_head:
   enabled: true
-  mask_value: -10.0
+  mask_value: -3.0
   positional_mask: true
   mask_disable_warmup: true   # No mask during warmup (full union alphabet)
   mask_ramp_warmup: 3         # Epochs before flat→positional ramp starts

@@ -1,8 +1,9 @@
-"""PostProcessor: forbidden filter + pattern validation."""
+"""PostProcessor: confusion correction, forbidden filter, pattern."""
 
 from __future__ import annotations
 
 from redstar_plate_ocr.plate.config import PlateConfig
+from redstar_plate_ocr.plate.confusion import correct_confusions
 from redstar_plate_ocr.plate.forbidden import ForbiddenFilter
 from redstar_plate_ocr.plate.pattern import PatternValidator
 from redstar_plate_ocr.plate.results import RawResult, RecognitionResult
@@ -31,6 +32,8 @@ class PostProcessor:
     ) -> RecognitionResult:
         """Apply post-processing to raw result.
 
+        Pipeline: confusion correction → forbidden filter → pattern validation.
+
         Args:
             raw: Raw recognition result.
             hypotheses: Optional list of (text, confidence) for
@@ -45,10 +48,21 @@ class PostProcessor:
         country = raw.country
         region = self.plate_config.regions.get(country)
 
+        # Step 1: confusion correction (fix B↔8, O↔0 etc.)
+        if region is not None:
+            text = correct_confusions(
+                text,
+                region.get_patterns(),
+                region.valid_chars.letters,
+                region.valid_chars.digits,
+            )
+
+        # Step 2: forbidden filter
         text, needs_review = self._apply_forbidden(
             text, needs_review, country, region, hypotheses,
         )
 
+        # Step 3: pattern validation
         if region is not None:
             text, needs_review = self._apply_pattern_validation(
                 text, needs_review, region,

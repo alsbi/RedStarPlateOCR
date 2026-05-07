@@ -40,35 +40,50 @@ def test_backbone_param_count():
 # T3.2: Classification Heads
 
 
+def _make_mask(
+    orig_h: torch.Tensor, orig_w: torch.Tensor
+) -> torch.Tensor:
+    """Shortcut to compute content_mask with default feat params."""
+    return compute_content_mask(
+        orig_h, orig_w, feat_h=20, feat_w=48, stride=4
+    )
+
+
 def test_format_head_shape():
     """FormatHead uses content_mask + plate dims, not visual features."""
     head = FormatHead(in_channels=256)
     x = torch.randn(2, 256, 20, 48)
     orig_h = torch.tensor([80, 60], dtype=torch.int64)
     orig_w = torch.tensor([192, 192], dtype=torch.int64)
-    content_mask = compute_content_mask(orig_h, orig_w, feat_h=20, feat_w=48, stride=4)
-    out = head(x, content_mask=content_mask, orig_h=orig_h, orig_w=orig_w)
+    cmask = _make_mask(orig_h, orig_w)
+    out = head(
+        x, content_mask=cmask, orig_h=orig_h, orig_w=orig_w
+    )
     assert out.shape == (2, 2)
 
 
 def test_format_head_ignores_visual_features():
-    """FormatHead output depends only on plate dims and shape, not on pixel values."""
+    """FormatHead output depends only on plate dims/shape, not pixels."""
     head = FormatHead(in_channels=256)
     head.eval()
     orig_h = torch.tensor([80], dtype=torch.int64)
     orig_w = torch.tensor([192], dtype=torch.int64)
-    content_mask = compute_content_mask(orig_h, orig_w, feat_h=20, feat_w=48, stride=4)
+    cmask = _make_mask(orig_h, orig_w)
 
     x1 = torch.randn(1, 256, 20, 48)
-    x2 = torch.randn(1, 256, 20, 48)  # completely different pixels
+    x2 = torch.randn(1, 256, 20, 48)  # different pixels
 
     with torch.no_grad():
-        out1 = head(x1, content_mask=content_mask, orig_h=orig_h, orig_w=orig_w)
-        out2 = head(x2, content_mask=content_mask, orig_h=orig_h, orig_w=orig_w)
+        out1 = head(
+            x1, content_mask=cmask, orig_h=orig_h, orig_w=orig_w
+        )
+        out2 = head(
+            x2, content_mask=cmask, orig_h=orig_h, orig_w=orig_w
+        )
 
     # Same plate dims → same logits regardless of features
     assert torch.allclose(out1, out2, atol=1e-6), (
-        "FormatHead should depend only on plate shape/dims, not visual features"
+        "FormatHead should depend only on shape/dims"
     )
 
 
@@ -83,15 +98,21 @@ def test_format_head_different_dims_different_output():
     orig_h_sq = torch.tensor([80], dtype=torch.int64)
     orig_w_sq = torch.tensor([80], dtype=torch.int64)
 
-    mask_std = compute_content_mask(orig_h_std, orig_w_std, feat_h=20, feat_w=48, stride=4)
-    mask_sq = compute_content_mask(orig_h_sq, orig_w_sq, feat_h=20, feat_w=48, stride=4)
+    mask_std = _make_mask(orig_h_std, orig_w_std)
+    mask_sq = _make_mask(orig_h_sq, orig_w_sq)
 
     with torch.no_grad():
-        out_std = head(x, content_mask=mask_std, orig_h=orig_h_std, orig_w=orig_w_std)
-        out_sq = head(x, content_mask=mask_sq, orig_h=orig_h_sq, orig_w=orig_w_sq)
+        out_std = head(
+            x, content_mask=mask_std,
+            orig_h=orig_h_std, orig_w=orig_w_std,
+        )
+        out_sq = head(
+            x, content_mask=mask_sq,
+            orig_h=orig_h_sq, orig_w=orig_w_sq,
+        )
 
     assert not torch.allclose(out_std, out_sq, atol=1e-6), (
-        "Different plate dimensions should produce different format logits"
+        "Different plate dims should produce different format logits"
     )
 
 

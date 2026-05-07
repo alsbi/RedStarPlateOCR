@@ -98,10 +98,8 @@ def _alphabet_indices_for(
     """Return allowed alphabet indices for a pattern character."""
     if pattern_char in ("X", "x"):
         allowed = valid_letters
-    elif pattern_char == "0":
+    elif pattern_char in ("0", "o"):
         allowed = valid_digits
-    elif pattern_char == "o":
-        allowed = valid_letters | valid_digits
     else:
         allowed = {pattern_char}
     return {i for i, ch in enumerate(alphabet) if ch in allowed}
