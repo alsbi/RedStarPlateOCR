@@ -152,7 +152,7 @@ def evaluate(
     """Evaluate model on a dataset."""
 
     from redstar_plate_ocr.data.dataset import PlateDataset
-    from redstar_plate_ocr.data.transforms import PreprocessPipeline
+    from redstar_plate_ocr.pipeline.preprocess import PreprocessPipeline
     from redstar_plate_ocr.pipeline.evaluator import Evaluator
 
     setup_logging(verbose=_verbose_count)

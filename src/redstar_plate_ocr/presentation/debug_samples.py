@@ -13,7 +13,7 @@ import yaml
 
 from redstar_plate_ocr.data.augmentation import build_single_augmentation
 from redstar_plate_ocr.data.dataset import PlateDataset
-from redstar_plate_ocr.data.transforms import PreprocessPipeline
+from redstar_plate_ocr.pipeline.preprocess import PreprocessPipeline
 from redstar_plate_ocr.nn.compression import compute_content_mask
 from redstar_plate_ocr.plate.config import PlateConfig
 

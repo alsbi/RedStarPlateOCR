@@ -95,3 +95,4 @@ export = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/redstar_plate_ocr"]
+exclude = ["src/redstar_plate_ocr/data"]
