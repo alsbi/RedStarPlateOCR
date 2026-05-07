@@ -43,7 +43,12 @@ class _ConcatDatasetWithSamples(ConcatDataset):
 
 
 class _StratifiedBatchSampler(Sampler[list[int]]):
-    """BatchSampler с группировкой по композитному ключу."""
+    """BatchSampler с группировкой по композитному ключу.
+
+    При ``original_prob < 1.0`` оригинальные сэмплы (индексы
+    ``0 .. original_len-1``) включаются в батч с указанной
+    вероятностью — каждый раз заново при каждой эпохе.
+    """
 
     def __init__(
         self,
@@ -51,12 +56,16 @@ class _StratifiedBatchSampler(Sampler[list[int]]):
         batch_size: int,
         is_train: bool = True,
         stratify_keys: list[str] | None = None,
+        original_prob: float = 1.0,
+        original_len: int = 0,
     ) -> None:
         if stratify_keys is None:
             stratify_keys = ["plate_type", "region"]
         self.batch_size = batch_size
         self.is_train = is_train
         self.stratify_keys = stratify_keys
+        self.original_prob = original_prob
+        self.original_len = original_len
 
         self._groups = self._build_groups(dataset)
         self._indices_built = not is_train
@@ -113,10 +122,34 @@ class _StratifiedBatchSampler(Sampler[list[int]]):
         groups = {k: list(idx_list) for k, idx_list in self._groups.items()}
         self._shuffle_groups(groups)
         pool = self._interleave_groups(groups)
+        pool = self._filter_original_indices(pool)
         batches = _chunk_batches(pool, self.batch_size)
         if self.is_train:
             random.shuffle(batches)
         return batches
+
+    def _filter_original_indices(
+        self, indices: list[int]
+    ) -> list[int]:
+        """Исключает оригинальные сэмплы с вероятностью 1-original_prob.
+
+        Работает только при is_train и original_prob < 1.0.
+        Каждый вызов (каждая эпоха) рандомизирует заново.
+        """
+        if (
+            not self.is_train
+            or self.original_prob >= 1.0
+            or self.original_len <= 0
+        ):
+            return indices
+        if self.original_prob <= 0.0:
+            return [i for i in indices if i >= self.original_len]
+        return [
+            i
+            for i in indices
+            if i >= self.original_len
+            or random.random() < self.original_prob
+        ]
 
     def __iter__(self):
         if self.is_train:
@@ -161,6 +194,8 @@ def build_dataloader(
     is_train: bool = True,
     stratify_keys: list[str] | None = None,
     device: torch.device | None = None,
+    original_prob: float = 1.0,
+    original_len: int = 0,
 ) -> torch.utils.data.DataLoader:
     """Строит DataLoader со stratified batch sampling."""
     batch_sampler = _StratifiedBatchSampler(
@@ -168,6 +203,8 @@ def build_dataloader(
         batch_size=batch_size,
         is_train=is_train,
         stratify_keys=stratify_keys,
+        original_prob=original_prob,
+        original_len=original_len,
     )
 
     pin_memory = device is not None and device.type == "cuda"

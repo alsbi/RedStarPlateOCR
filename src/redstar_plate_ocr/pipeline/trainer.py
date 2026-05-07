@@ -277,12 +277,21 @@ class Trainer:
             "none"   → only originals (warmup / final polish)
             "single" → originals + 1 copy with exactly 1 random aug
             "full"   → originals + single + num_multi_aug multi-aug copies
+
+        ``original_prob`` controls how likely each original (non-augmented)
+        sample is included per epoch.  In phase "none" it is always 1.0.
         """
         allowed = self.plate_config.country_list
         base_pipeline = self._build_base_pipeline()
 
         # Warmup: balance per group for equal exposure
         do_balance = phase == "none"
+
+        # In phase "none" (warmup / final polish) always use all
+        # originals — no stochastic subsampling.
+        orig_prob = (
+            1.0 if phase == "none" else self.config.original_prob
+        )
 
         if phase == "none":
             train_ds = self._make_filtered_dataset(
@@ -301,6 +310,7 @@ class Trainer:
         )
 
         datasets = [self._make_filtered_dataset(base_pipeline, allowed)]
+        original_len = len(datasets[0])
 
         # 1 copy: exactly 1 random augmentation
         single_pipeline = self._build_single_aug_pipeline()
@@ -337,6 +347,8 @@ class Trainer:
             num_workers=self.config.num_workers,
             is_train=True,
             device=self.device,
+            original_prob=orig_prob,
+            original_len=original_len,
         )
 
     def _build_val_loader(self) -> DataLoader:

@@ -31,6 +31,7 @@ class TrainingConfig:
     num_multi_aug: int = 1
     multi_aug_min: int = 2
     square_oversample_ratio: float = 0.0
+    original_prob: float = 1.0
     num_workers: int = 4
 
     # Validation frequency
@@ -112,5 +113,6 @@ class TrainingConfig:
             square_oversample_ratio=training.get(
                 "square_oversample_ratio", 0.0
             ),
+            original_prob=training.get("original_prob", 1.0),
             num_workers=training.get("num_workers", 4),
         )

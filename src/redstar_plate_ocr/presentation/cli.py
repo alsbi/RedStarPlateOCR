@@ -77,6 +77,12 @@ def train(
         None,
         help="Augmentation config YAML",
     ),
+    original_prob: float = typer.Option(
+        1.0,
+        "--original-prob",
+        help="Probability of including original (non-augmented) "
+        "images in training batches (0.0-1.0)",
+    ),
 ) -> None:
     """Start training."""
 
@@ -85,6 +91,11 @@ def train(
 
     pc = _load_plate_config(plate_config)
     cfg = _load_model_config(config, augmentation)
+
+    # CLI override for original_prob
+    if "training" not in cfg:
+        cfg["training"] = {}
+    cfg["training"]["original_prob"] = original_prob
 
     out = Path(output_dir)
     setup_logging(verbose=_verbose_count)
