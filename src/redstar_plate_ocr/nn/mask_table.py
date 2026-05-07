@@ -78,7 +78,12 @@ def build_positional_mask_table(
 
     for c_idx, c_name in enumerate(plate_config.country_list):
         region = plate_config.regions[c_name]
-        region_letters = set(region.valid_chars.letters)
+        # Only true alphabetic letters — valid_chars.letters may include
+        # '-' or other separators that are *not* real letters and must
+        # NOT be allowed at X/x positions.  Hyphens are only allowed
+        # at the literal '-' position in the pattern (handled by
+        # _char_allowed).
+        region_letters = {c for c in region.valid_chars.letters if c.isalpha()}
         region_digits = set(region.valid_chars.digits)
         patterns = region.pattern
 

@@ -273,3 +273,51 @@ class TestPositionalMaskTable:
                 assert is_masked, (
                     f"KZ pos=0: letter '{ch}' should be masked"
                 )
+
+    def test_hyphen_not_allowed_at_letter_position(
+        self, plate_config: PlateConfig
+    ) -> None:
+        """CRITICAL: hyphen must NOT be allowed at X/x positions.
+
+        Regression test: when valid_chars.letters contains '-'
+        (e.g. BY='ABEKMHOPCTYXD-', GE='ABCDEFGHIJKLMNOPQRSTUVWXYZ-'),
+        the mask table previously leaked '-' into X/x positions
+        because region_letters included it.  The fix filters
+        region_letters to only alphabetic characters so that '-'
+        is only allowed at the literal '-' pattern position.
+        """
+        table = build_positional_mask_table(
+            plate_config, max_seq_len=16
+        )
+        union = plate_config.union_alphabet
+        dash_idx = union.index("-")
+
+        # Check BY: pattern '0000XX-0'
+        by_idx = plate_config.country_list.index("BY")
+        by_pattern = plate_config.regions["BY"].pattern[0]  # '0000XX-0'
+
+        for pos, pc in enumerate(by_pattern):
+            is_masked = table[by_idx, pos, dash_idx].item() == MASK_VALUE
+            if pc == "-":
+                assert not is_masked, (
+                    f"BY pos={pos} ('-'): hyphen should be allowed"
+                )
+            else:
+                assert is_masked, (
+                    f"BY pos={pos} ('{pc}'): hyphen must be masked"
+                )
+
+        # Check GE: pattern 'XX-000-XX'
+        ge_idx = plate_config.country_list.index("GE")
+        ge_pattern = plate_config.regions["GE"].pattern[0]  # 'XX-000-XX'
+
+        for pos, pc in enumerate(ge_pattern):
+            is_masked = table[ge_idx, pos, dash_idx].item() == MASK_VALUE
+            if pc == "-":
+                assert not is_masked, (
+                    f"GE pos={pos} ('-'): hyphen should be allowed"
+                )
+            else:
+                assert is_masked, (
+                    f"GE pos={pos} ('{pc}'): hyphen must be masked"
+                )
