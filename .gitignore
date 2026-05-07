@@ -28,5 +28,228 @@ Thumbs.db
 *.pth
 *.onnx
 
-# Data
-data/
+# Data (track sample dataset, ignore large real data)
+data/*
+!data/plates/
+!data/plates/*/
+!data/plates/*/*.png
+!data/plates/*/*.jpg
+!data/plates/*/*.jpeg
+!data/test/
+!data/test/*.csv
+!data/train/
+!data/train/*.csv
+!data/val/
+!data/val/*.csv
+
+# ============================================================
+# AI / Coding Agent temporary files and directories
+# ============================================================
+
+# Claude Code
+.claude/
+.clauderc
+.claudeignore
+
+# Cline
+.cline/
+.clinerules
+.clineignore
+
+# Cursor
+.cursor/
+.cursorignore
+.cursorindexingignore
+
+# Roo Code
+.roo/
+.rooignore
+.roorules
+
+# Windsurf / Codeium
+.windsurf/
+.windsurfrules
+.codeium/
+
+# Continue.dev
+.continue/
+.continuedev/
+
+# Aider
+.aider*
+.aider.conf.yml
+
+# GitHub Copilot
+.copilot/
+
+# Amazon Q
+.amazonq/
+
+# Tabnine
+.tabnine/
+
+# SuperMaven
+.supermaven/
+
+# Augment Code
+.augment/
+
+# Trae
+.trae/
+
+# Sourcegraph Cody
+.sourcegraph/
+
+# Taskmaster
+.taskmaster/
+
+# Fabric
+.fabric/
+
+# Open Interpreter
+.openinterpreter/
+
+# Smol Developer
+.smoldeveloper/
+
+# GPT Engineer
+.gptengineer/
+
+# Sweep
+.sweep/
+
+# Devika
+.devika/
+
+# MetaGPT
+.metagpt/
+
+# Tabby
+.tabby/
+
+# General agent conversation logs / session data
+agent_logs/
+agent_sessions/
+.agent_history/
+.agent_cache/
+agent_output/
+
+# ============================================================
+# Testing / CI artifacts
+# ============================================================
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+junit-*.xml
+test-results/
+nunit/
+*.cover
+.hypothesis/
+
+# ============================================================
+# Jupyter
+# ============================================================
+
+.ipynb_checkpoints/
+*.ipynb_metadata
+
+# ============================================================
+# ML / Training artifacts
+# ============================================================
+
+runs/
+mlruns/
+.mlflow/
+wandb/
+lightning_logs/
+.checkpoints/
+tensorboard/
+tb_logs/
+logs/
+outputs/
+wandb_logs/
+
+# ============================================================
+# Temporary / backup / cache files
+# ============================================================
+
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+.cache/
+*.cache
+*.pid
+*.seed
+*.lock
+!uv.lock
+*.part
+*.download
+*.incomplete
+
+# ============================================================
+# Other tool artifacts
+# ============================================================
+
+# Ruff
+.ruff_cache/
+
+# Black
+.black_cache/
+
+# isort
+.isort.cfg
+
+# Pip
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Setuptools
+*.whl
+
+# PyInstaller
+*.manifest
+*.spec
+
+# mypy
+.mypy_cache/
+
+# pyre
+.pyre/
+
+# pyright
+.pyright/
+
+# Bandit
+bandit_report.txt
+
+# Safety
+safety_report.txt
+
+# Docker
+.docker/
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+
+# Node (if any JS tooling)
+node_modules/
+
+# Direnv
+.direnv/
+.envrc
+
+# Asdf
+.tool-versions
