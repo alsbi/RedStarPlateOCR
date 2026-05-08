@@ -161,6 +161,7 @@ class Trainer:
             char_aux_weight=self.config.char_aux_weight,
             order_weight=self.config.order_weight,
             order_margin=self.config.order_margin,
+            length_weight=self.config.length_weight,
         )
         self.evaluator = Evaluator(
             plate_config, self.device, beam_width=1,

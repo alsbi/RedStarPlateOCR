@@ -82,6 +82,7 @@ class CombinedLoss(nn.Module):
         char_aux_weight: float = 0.0,
         order_weight: float = 0.0,
         order_margin: float = 1.0,
+        length_weight: float = 0.0,
     ):
         super().__init__()
         self.plate_config = plate_config
@@ -92,6 +93,7 @@ class CombinedLoss(nn.Module):
         self.char_aux_weight = char_aux_weight
         self.order_weight = order_weight
         self.order_margin = order_margin
+        self.length_weight = length_weight
         self.format_loss = nn.CrossEntropyLoss()
         self.country_loss = nn.CrossEntropyLoss(
             label_smoothing=country_label_smoothing
@@ -163,6 +165,14 @@ class CombinedLoss(nn.Module):
         if self.order_weight > 0:
             weighted_sum = weighted_sum + self.order_weight * l_order
 
+        l_length = self._compute_length_loss(
+            model_output.ctc_output,
+            gt_texts,
+            input_lengths,
+        )
+        if l_length is not None:
+            weighted_sum = weighted_sum + self.length_weight * l_length
+
         if self.synergy_weight > 0:
             bonus = self.synergy_weight * self._compute_synergy_bonus(
                 model_output,
@@ -188,6 +198,8 @@ class CombinedLoss(nn.Module):
         }
         if l_char_aux is not None:
             result["char_aux"] = l_char_aux
+        if l_length is not None:
+            result["length"] = l_length
         return result
 
     def _compute_ctc_loss(
@@ -442,3 +454,56 @@ class CombinedLoss(nn.Module):
 
         batch_penalty = torch.stack(penalties).mean()
         return batch_penalty
+
+    def _compute_length_loss(
+        self,
+        ctc_output: Tensor,
+        gt_texts: list[str],
+        input_lengths: Tensor,
+    ) -> Tensor | None:
+        """Differentialble length consistency loss.
+
+        Censures enough non-blank emission probability along the
+        sequence to cover every character in the ground-truth text.
+
+        For each sample we compute the expected number of emitted
+        non-blank symbols (sum of marginal non-blank probabilities
+        over valid positions) and compare it against the true
+        number of characters.  When this expectation drops below the
+        target the model is penalised — forcing it to emit, not
+        blank, in timesteps that should contain characters.
+
+        This especially matters for optional trailing symbols (RU `o`)
+        which CTC can silently skip without any loss penalty.
+
+        Returns None when length_weight == 0.
+        """
+        if self.length_weight <= 0:
+            return None
+
+        union_alphabet = self.plate_config.union_alphabet
+        blank_idx = len(union_alphabet)
+        B = ctc_output.shape[0]
+        losses: list[Tensor] = []
+
+        for b in range(B):
+            T = int(input_lengths[b].item())
+            sample_logits = ctc_output[b, :T]           # (T, V)
+            target_len = len(gt_texts[b])
+            if target_len == 0:
+                continue
+
+            # Soft non-blank emission count:
+            # For each timestep, probability mass on non-blank chars.
+            probs = F.softmax(sample_logits, dim=-1)     # (T, V)
+            non_blank_probs = probs[:, :blank_idx].sum(dim=-1)  # (T,)
+            expected_count = non_blank_probs.sum()      # scalar
+
+            # Under-emission penalty: if expected non-blank < target
+            diff = target_len - expected_count
+            if diff > 0:
+                losses.append(diff * diff)
+
+        if not losses:
+            return torch.tensor(0.0, device=ctc_output.device)
+        return torch.stack(losses).mean()

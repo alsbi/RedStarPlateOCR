@@ -60,6 +60,9 @@ class TrainingConfig:
     order_weight: float = 0.0
     order_margin: float = 1.0
 
+    # Length-consistency loss (penalise under-emission of chars)
+    length_weight: float = 0.0
+
     # Loss weights
     format_weight: float = 1.0
     country_weight: float = 1.5
@@ -109,6 +112,7 @@ class TrainingConfig:
             char_aux_weight=training.get("char_aux_weight", 0.3),
             order_weight=training.get("order_weight", 0.0),
             order_margin=training.get("order_margin", 1.0),
+            length_weight=training.get("length_weight", 0.0),
             format_weight=training.get("format_weight", 1.0),
             country_weight=training.get("country_weight", 1.5),
             ctc_weight=training.get("ctc_weight", 1.2),
