@@ -88,6 +88,7 @@ training:
   country_grad_scale: 5.0
   char_aux_weight: 0.45
   order_weight: 0.3
+  length_weight: 0.5
   order_margin: 1.0
   scheduled_sampling_max_prob: 0.5
   scheduled_sampling_ramp_epochs: 5
