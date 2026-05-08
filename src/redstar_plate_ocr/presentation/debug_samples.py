@@ -157,6 +157,7 @@ def debug_samples(
     norm = preproc.get("normalization", {})
     mean = norm.get("mean", [0.485, 0.456, 0.406])
     std = norm.get("std", [0.229, 0.224, 0.225])
+    enhancement_cfg = preproc.get("smart_enhancement", None)
 
     aug = None
     if augmentation_path:
@@ -191,6 +192,7 @@ def debug_samples(
             mean=mean,
             std=std,
             augmentation=aug,
+            enhancement_config=enhancement_cfg,
             hooks={
                 "on_augmented": _save_hook_factory(
                     captured, "augmented"

@@ -126,7 +126,8 @@ class TestBuildMaskTable:
         config = plate_config
         mask = build_mask_table(config)
 
-        num_countries = len(config.regions)
+        # Only enabled countries have masks in build_mask_table
+        num_countries = len(config.country_list)
         assert mask.shape == (num_countries, config.union_alphabet_size)
 
     def test_mask_table_is_float(self, plate_config: PlateConfig):

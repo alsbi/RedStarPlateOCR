@@ -178,6 +178,7 @@ class Trainer:
         self.mean = norm.get("mean", _IMAGENET_MEAN)
         self.std = norm.get("std", _IMAGENET_STD)
         self.aug_cfg = cfg.get("augmentation", {})
+        self.enhancement_cfg = preproc.get("smart_enhancement", None)
 
         self._interrupt_requested: bool = False
         self._save_thread: threading.Thread | None = None
@@ -206,6 +207,7 @@ class Trainer:
             pad_color=self.pad_color,
             mean=self.mean,
             std=self.std,
+            enhancement_config=self.enhancement_cfg,
         )
 
     def _build_single_aug_pipeline(
@@ -362,6 +364,7 @@ class Trainer:
             mean=self.mean,
             std=self.std,
             augmentation=None,
+            enhancement_config=self.enhancement_cfg,
         )
         self.val_dataset.transform = transform
         return build_dataloader(

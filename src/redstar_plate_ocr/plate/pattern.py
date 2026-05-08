@@ -39,17 +39,21 @@ def _classify_char(
     ch: str,
     pc: str,
     valid_letters: str,
-    valid_digits: str,) -> tuple[str, bool, int]:
+    valid_digits: str,
+) -> tuple[str, bool, int]:
     """Classify input char against pattern slot.
 
     Returns (output_char, was_corrected, text_index_increment).
     """
+    # Filter separators out of valid_letters so '-' is not
+    # treated as a letter at an X slot.
+    _letters = "".join(c for c in valid_letters if c.isalpha())
     if pc == "X":
-        return _resolve_mandatory(ch, valid_letters, valid_letters[0])
+        return _resolve_mandatory(ch, _letters, _letters[0])
     if pc == "0":
         return _resolve_mandatory(ch, valid_digits, valid_digits[0])
     if pc == "x":
-        return _resolve_optional(ch, valid_letters)
+        return _resolve_optional(ch, _letters)
     if pc == "o":
         return _resolve_optional(ch, valid_digits)
     return _resolve_literal(ch, pc)

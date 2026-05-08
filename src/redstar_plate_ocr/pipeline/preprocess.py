@@ -11,6 +11,12 @@ import numpy as np
 import torch
 from numpy.typing import NDArray
 
+from redstar_plate_ocr.pipeline.enhancement import (
+    QualityAssessor,
+    SmartEnhancer,
+    build_enhancement_stack,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -100,6 +106,7 @@ class PreprocessPipeline:
         mean: list[float] | None = None,
         std: list[float] | None = None,
         augmentation: A.Compose | None = None,
+        enhancement_config: dict[str, object] | None = None,
         hooks: dict[str, Callable[[np.ndarray | torch.Tensor], None]]
         | None = None,
     ) -> None:
@@ -116,6 +123,9 @@ class PreprocessPipeline:
         )
         self.augmentation = augmentation
         self._hooks = hooks or {}
+        self._assessor, self._enhancer = build_enhancement_stack(
+            enhancement_config
+        )
 
     def get_aug_description(self) -> list[str]:
         """Возвращает список описаний трансформаций аугментации."""
@@ -150,13 +160,28 @@ class PreprocessPipeline:
         return tensor, scaled_h, scaled_w
 
     def _scale(self, image: np.ndarray) -> np.ndarray:
-        """Масштабирование с сохранением пропорций."""
-        h, w = image.shape[:2]
+        """Масштабирование с сохранением пропорций.
+
+        Микро-кропы и низкокачественные изображения проходят через
+        :class:`SmartEnhancer` перед финальным resize (Lanczos4).
+        """
+        img = image
+
+        # Smart conditional enhancement
+        if self._assessor is not None and self._enhancer is not None:
+            if self._assessor.needs_enhancement(img):
+                logger.debug(
+                    "Enhancing crop: %s",
+                    self._assessor.describe(img),
+                )
+                img = self._enhancer.enhance(img)
+
+        h, w = img.shape[:2]
         scale = min(self.canvas_width / w, self.canvas_height / h)
         new_w = round(w * scale)
         new_h = round(h * scale)
         scaled = cv2.resize(
-            image,
+            img,
             (new_w, new_h),
             interpolation=cv2.INTER_LANCZOS4,
         )

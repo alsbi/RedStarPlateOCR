@@ -123,7 +123,7 @@ def correct_confusions(
     if not text or not patterns:
         return text
 
-    letters_fs = frozenset(valid_letters)
+    letters_fs = frozenset(c for c in valid_letters if c.isalpha())
     digits_fs = frozenset(valid_digits)
 
     best_text = text

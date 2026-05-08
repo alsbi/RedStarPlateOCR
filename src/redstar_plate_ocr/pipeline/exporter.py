@@ -57,7 +57,8 @@ class ONNXWrapper(torch.nn.Module):
             orig_h,
             orig_w,
         )
-        lstm_std = self.model.bilstm(comp_std)
+        pe_std = self.model.pos_encoding(comp_std)
+        lstm_std = self.model.bilstm(pe_std)
         standard_ctc = self.model.ctc_head.forward_raw(lstm_std)
 
         # Square path
@@ -66,7 +67,8 @@ class ONNXWrapper(torch.nn.Module):
             orig_h,
             orig_w,
         )
-        lstm_sq = self.model.bilstm(comp_sq)
+        pe_sq = self.model.pos_encoding(comp_sq)
+        lstm_sq = self.model.bilstm(pe_sq)
         square_ctc = self.model.ctc_head.forward_raw(lstm_sq)
 
         return format_logits, country_logits, standard_ctc, square_ctc
@@ -318,4 +320,6 @@ def _preprocess_raw_to_pipeline_params(
         params["mean"] = norm["mean"]
     if "std" in norm:
         params["std"] = norm["std"]
+    if "smart_enhancement" in raw:
+        params["enhancement_config"] = raw["smart_enhancement"]
     return params

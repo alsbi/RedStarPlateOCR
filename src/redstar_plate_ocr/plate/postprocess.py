@@ -186,7 +186,7 @@ class BeamSearchDecoder:
         """Build per-position allowed character index sets."""
         if self.pattern is None:
             return None
-        valid_l = set(self.valid_letters)
+        valid_l = {c for c in self.valid_letters if c.isalpha()}
         valid_d = set(self.valid_digits)
         return [
             _alphabet_indices_for(pc, self.alphabet, valid_l, valid_d)
