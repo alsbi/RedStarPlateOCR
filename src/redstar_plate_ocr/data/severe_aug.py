@@ -523,3 +523,20 @@ class SevereAugScheduler:
             "early_stop_counter",
             0,
         )
+
+
+class SevereAugCallable:
+    """Picklable callable for use with A.Lambda in multiprocessing dataloaders.
+
+    Wraps :func:`severe_aug` so it can be serialized by ``pickle``
+    (required for ``num_workers > 0`` on macOS with *spawn* start).
+
+    Args:
+        scheduler: :class:`SevereAugScheduler` instance providing intensity.
+    """
+
+    def __init__(self, scheduler: SevereAugScheduler) -> None:
+        self._scheduler = scheduler
+
+    def __call__(self, image: np.ndarray, **kwargs) -> np.ndarray:
+        return severe_aug(image, self._scheduler.get_intensity())

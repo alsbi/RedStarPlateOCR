@@ -300,20 +300,12 @@ class Trainer:
         """Create pipeline with severe augmentation."""
         import albumentations as A
 
-        from redstar_plate_ocr.data.severe_aug import severe_aug
-
-        scheduler = self.severe_scheduler
-
-        def _apply_severe(
-            image,
-            **kwargs,
-        ):
-            return severe_aug(image, scheduler.get_intensity())
+        from redstar_plate_ocr.data.severe_aug import SevereAugCallable
 
         augmentation = A.Compose(
             [
                 A.Lambda(
-                    image=_apply_severe,
+                    image=SevereAugCallable(self.severe_scheduler),
                     name="severe_aug",
                     p=1.0,
                 ),
