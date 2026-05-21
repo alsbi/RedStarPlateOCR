@@ -706,7 +706,7 @@ class Trainer:
 
     def _apply_epoch_result(
         self,
-        result: "_EpochResult",
+        result: _EpochResult,
         epoch: int,
         best_metric: float,
     ) -> tuple[
@@ -745,7 +745,7 @@ class Trainer:
         best_metrics: dict[str, float],
         patience_counter: int,
         epoch_times: list[float],
-    ) -> tuple["_EpochResult", float, list[float]]:
+    ) -> tuple[_EpochResult, float, list[float]]:
         """Run a single epoch and update tracking state.
 
         Returns (result, epoch_start_time_for_tracking, updated_epoch_times).
@@ -794,7 +794,7 @@ class Trainer:
 
     def _should_stop_epoch(
         self,
-        result: "_EpochResult",
+        result: _EpochResult,
         epoch: int,
         best_metric: float,
     ) -> bool:
@@ -909,7 +909,7 @@ class Trainer:
         loader: DataLoader,
         sampling_prob: float,
         progress_display: ProgressDisplay,
-        task_id: "TaskID",
+        task_id: TaskID,
         epoch_start: float = 0.0,
         current_epoch: int = 0,
         tracker: MetricsTracker | None = None,

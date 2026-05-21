@@ -74,10 +74,7 @@ def apply_brightness_contrast(
         alpha = np.random.uniform(low, high)
     else:
         alpha = 1.0
-    if shift > 0:
-        beta = np.random.uniform(-shift, shift)
-    else:
-        beta = 0.0
+    beta = np.random.uniform(-shift, shift) if shift > 0 else 0.0
     return cv2.convertScaleAbs(image, alpha=alpha, beta=beta)
 
 
@@ -227,7 +224,7 @@ def apply_pixel_corruption(
         num_blocks = max(1, int(block_h * block_w * block_ratio))
         by = np.random.randint(0, block_h, size=num_blocks) * 8
         bx = np.random.randint(0, block_w, size=num_blocks) * 8
-        for y, x in zip(by, bx):
+        for y, x in zip(by, bx, strict=True):
             y_end = min(y + 8, h)
             x_end = min(x + 8, w)
             channel = np.random.randint(0, 3)

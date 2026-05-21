@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import math
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import torch
 from torch import Tensor
 
 
-def _compute_confidence(probs: "Sequence[float]") -> float:
+def _compute_confidence(probs: Sequence[float]) -> float:
     """Geometric mean confidence from a sequence of probabilities."""
     if len(probs) == 0:
         return 1.0
@@ -363,10 +363,7 @@ def _update_beam(
     """Update beam entry with new p_blank and/or p_non_blank."""
     if key in beam:
         old_b, old_nb = beam[key]
-        if p_b != float("-inf"):
-            new_b = _log_sum_exp(old_b, p_b)
-        else:
-            new_b = old_b
+        new_b = _log_sum_exp(old_b, p_b) if p_b != float("-inf") else old_b
         if p_nb != float("-inf"):
             new_nb = _log_sum_exp(old_nb, p_nb)
         else:

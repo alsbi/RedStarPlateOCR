@@ -244,7 +244,7 @@ class Exporter:
             },
         )
 
-        for i, (pt_t, ort_a) in enumerate(zip(pt_out, ort_out)):
+        for i, (pt_t, ort_a) in enumerate(zip(pt_out, ort_out, strict=True)):
             diff_arr = np.abs(pt_t.numpy() - ort_a)
             diff = float(np.nanmax(diff_arr)) if diff_arr.size else 0.0
             if diff > 1e-4:

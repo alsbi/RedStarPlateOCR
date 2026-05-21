@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 import cv2
 import numpy as np

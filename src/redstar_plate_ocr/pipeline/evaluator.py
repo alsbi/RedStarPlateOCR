@@ -117,7 +117,7 @@ class Evaluator:
         region_accs: dict[str, Accuracy],
     ) -> None:
         """Update per-region accuracy trackers."""
-        for pred, tgt, region in zip(preds, gt_texts, gt_regions):
+        for pred, tgt, region in zip(preds, gt_texts, gt_regions, strict=True):
             if region not in region_accs:
                 region_accs[region] = Accuracy()
             region_accs[region].update([pred], [tgt])
@@ -335,7 +335,7 @@ class Evaluator:
             dict(gt_dist.most_common()),
         )
         confusion: dict[str, Counter] = {}
-        for pred, gt in zip(pred_countries, gt_countries):
+        for pred, gt in zip(pred_countries, gt_countries, strict=True):
             confusion.setdefault(gt, Counter())[pred] += 1
         for gt in sorted(confusion):
             parts = []
@@ -372,7 +372,7 @@ class Evaluator:
     ) -> tuple[list[str], list[str]]:
         """Filter predictions and targets by plate type."""
         filtered_p, filtered_t = [], []
-        for p, t, pt in zip(preds, targets, plate_types):
+        for p, t, pt in zip(preds, targets, plate_types, strict=True):
             if pt == target_type:
                 filtered_p.append(p)
                 filtered_t.append(t)

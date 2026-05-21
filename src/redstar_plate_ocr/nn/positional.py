@@ -81,7 +81,7 @@ class SinusoidalPositionalEncoding(nn.Module):
         """
         T = x.size(1)
         pe_len = self._pe.size(0)
-        if T <= pe_len:
+        if pe_len >= T:
             pe = self._pe[:T]
         else:
             # Extend PE table on-the-fly for long sequences (rare)

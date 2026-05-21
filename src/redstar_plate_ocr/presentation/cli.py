@@ -601,7 +601,7 @@ def _validate_checkpoint_compat(
             console.print(f"[yellow]⚠ {w}[/yellow]")
     except ValueError as e:
         console.print(f"[bold red]Checkpoint incompatible:[/bold red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 def _build_datasets(

@@ -269,7 +269,7 @@ def adjacent_swap_correct(
     patterns: list[str],
     valid_letters: str,
     valid_digits: str,
-    ctc_logits: "object | None" = None,
+    ctc_logits: object | None = None,
     ctc_alignment: list[int] | None = None,
     alphabet: str = "",
     text_confidence: float = 1.0,

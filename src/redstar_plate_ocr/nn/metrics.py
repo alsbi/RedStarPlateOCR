@@ -25,7 +25,7 @@ class CharacterErrorRate:
         targets: list[str],
     ) -> None:
         """Accumulate distances and target lengths."""
-        for pred, tgt in zip(predictions, targets):
+        for pred, tgt in zip(predictions, targets, strict=True):
             self._total_dist += levenshtein_distance(pred, tgt)
             self._total_len += max(len(tgt), 1)
 
@@ -54,7 +54,7 @@ class Accuracy:
         targets: list[str],
     ) -> None:
         """Count exact matches."""
-        for pred, tgt in zip(predictions, targets):
+        for pred, tgt in zip(predictions, targets, strict=True):
             self._total += 1
             if pred == tgt:
                 self._correct += 1
@@ -84,7 +84,7 @@ class CharacterAccuracy:
         targets: list[str],
     ) -> None:
         """Accumulate correct chars and total target chars."""
-        for pred, tgt in zip(predictions, targets):
+        for pred, tgt in zip(predictions, targets, strict=True):
             dist = levenshtein_distance(pred, tgt)
             self._total_correct += max(len(tgt) - dist, 0)
             self._total_chars += max(len(tgt), 1)
@@ -113,7 +113,7 @@ class NormalizedEditDistance:
         if not predictions:
             return 0.0
         total = 0.0
-        for pred, tgt in zip(predictions, targets):
+        for pred, tgt in zip(predictions, targets, strict=True):
             denom = max(len(pred), len(tgt))
             if denom == 0:
                 total += 1.0
@@ -140,7 +140,7 @@ class BigramSwapRate:
         if not predictions:
             return 0.0
         swaps = 0
-        for pred, tgt in zip(predictions, targets):
+        for pred, tgt in zip(predictions, targets, strict=True):
             found = False
             for bg in self.bigrams:
                 rev = bg[::-1]
@@ -167,7 +167,7 @@ class AdjacentTranspositionRate:
         """Return ATR = transpositions / total_with_errors."""
         transpositions = 0
         total_with_errors = 0
-        for pred, tgt in zip(predictions, targets):
+        for pred, tgt in zip(predictions, targets, strict=True):
             if pred == tgt:
                 continue
             total_with_errors += 1
@@ -204,7 +204,9 @@ def compute_per_group_metrics(
     groups: dict[str, dict[str, list[str]]] = defaultdict(
         lambda: {"preds": [], "tgts": []}
     )
-    for pred, tgt, label in zip(predictions, targets, group_labels):
+    for pred, tgt, label in zip(
+        predictions, targets, group_labels, strict=True
+    ):
         groups[label]["preds"].append(pred)
         groups[label]["tgts"].append(tgt)
 

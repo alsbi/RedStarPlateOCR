@@ -24,7 +24,7 @@ class RawResult:
     ctc_alignment: list[int] | None = None
     # CTC log-probabilities (T, V) tensor — needed for
     # logit-based adjacent-swap correction.
-    ctc_logits: "Tensor | None" = field(default=None, repr=False)
+    ctc_logits: Tensor | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)

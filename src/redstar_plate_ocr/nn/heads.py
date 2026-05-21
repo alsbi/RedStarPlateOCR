@@ -34,7 +34,7 @@ def _grid_pool(
     if mask is not None and mask.shape[-2:] != (H, W):
         mask = None  # shape mismatch — fall back to unmasked
 
-    if H < grid_rows or W < grid_cols:
+    if grid_rows > H or grid_cols > W:
         if mask is not None:
             return _masked_global_pool(x, mask, grid_rows * grid_cols)
         return gap(x).flatten(1).repeat(1, grid_rows * grid_cols)
