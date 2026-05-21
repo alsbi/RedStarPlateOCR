@@ -88,6 +88,11 @@ def train(
         "--enable-warmup/--no-enable-warmup",
         help="Override adaptive warmup setting from config",
     ),
+    trackio_dashboard: bool = typer.Option(
+        False,
+        "--trackio-dashboard/--no-trackio-dashboard",
+        help="Auto-launch TrackIO dashboard in browser during training",
+    ),
 ) -> None:
     """Start training."""
 
@@ -109,6 +114,12 @@ def train(
         if "warmup" not in cfg["augmentation"]:
             cfg["augmentation"]["warmup"] = {}
         cfg["augmentation"]["warmup"]["enable_warmup"] = enable_warmup
+
+    # CLI override for trackio_dashboard
+    if trackio_dashboard:
+        if "tracking" not in cfg:
+            cfg["tracking"] = {}
+        cfg["tracking"]["dashboard"] = True
 
     out = Path(output_dir)
     setup_logging(verbose=_verbose_count)

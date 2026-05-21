@@ -92,6 +92,7 @@ class TrainingConfig:
     trackio_enabled: bool = True
     trackio_project: str = "redstar-plate-ocr"
     trackio_name: str | None = None
+    trackio_dashboard: bool = False  # Auto-launch TrackIO dashboard
 
     @classmethod
     def from_dict(cls, cfg: dict) -> TrainingConfig:
@@ -165,4 +166,5 @@ class TrainingConfig:
             trackio_enabled=tracking.get("enabled", True),
             trackio_project=tracking.get("project", "redstar-plate-ocr"),
             trackio_name=tracking.get("name"),
+            trackio_dashboard=tracking.get("dashboard", False),
         )

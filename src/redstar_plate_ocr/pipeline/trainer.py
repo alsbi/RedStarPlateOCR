@@ -634,6 +634,18 @@ class Trainer:
             config=asdict(self.config),
         )
 
+        # Auto-launch dashboard if requested
+        self._dashboard: DashboardLauncher | None = None
+        if self.config.trackio_dashboard and self.config.trackio_enabled:
+            from redstar_plate_ocr.pipeline.tracking import (
+                DashboardLauncher,
+            )
+
+            self._dashboard = DashboardLauncher(
+                project=self.config.trackio_project,
+            )
+            self._dashboard.start()
+
         file_handler = logging.FileHandler(run_dir / "train.log")
         file_handler.setLevel(logging.DEBUG)
         fmt = logging.Formatter(
@@ -654,6 +666,8 @@ class Trainer:
                 )
         finally:
             self.tracker.finish()
+            if self._dashboard is not None:
+                self._dashboard.stop()
             signal.signal(signal.SIGINT, signal.SIG_IGN)
             logging.getLogger().removeHandler(file_handler)
             file_handler.close()

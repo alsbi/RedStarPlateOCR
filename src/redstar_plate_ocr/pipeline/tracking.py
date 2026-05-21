@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import webbrowser
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,80 @@ try:
     _trackio_available = True
 except ImportError:
     pass
+
+
+class DashboardLauncher:
+    """Launches TrackIO dashboard as a background process.
+
+    Uses ``trackio.show()`` with ``block_thread=False`` so the
+    dashboard runs in a separate thread while training continues.
+    """
+
+    def __init__(
+        self,
+        project: str,
+        port: int | None = None,
+        open_browser: bool = True,
+    ) -> None:
+        self._project = project
+        self._port = port
+        self._open_browser = open_browser
+        self._app: object | None = None
+        self._url: str | None = None
+
+    def start(self) -> None:
+        """Start the dashboard server in background."""
+        if not _trackio_available:
+            logger.warning("TrackIO not installed — cannot launch dashboard")
+            return
+
+        try:
+            import trackio
+
+            kwargs: dict[str, Any] = {
+                "project": self._project,
+                "open_browser": False,
+                "block_thread": False,
+            }
+            if self._port is not None:
+                kwargs["server_port"] = self._port
+
+            app, url, _share_url, _full_url = trackio.show(**kwargs)
+            self._app = app
+            self._url = url
+            logger.info("TrackIO dashboard started at %s", url)
+
+            if self._open_browser and url:
+                import threading
+
+                def _open() -> None:
+                    import time
+
+                    time.sleep(3)
+                    webbrowser.open(url)
+
+                threading.Thread(target=_open, daemon=True).start()
+        except Exception as e:
+            logger.warning("Failed to launch TrackIO dashboard: %s", e)
+
+    def stop(self) -> None:
+        """Stop the dashboard server."""
+        if self._app is not None:
+            try:
+                # trackio show returns an app with .close()
+                close = getattr(self._app, "close", None)
+                if callable(close):
+                    close()
+                    logger.info("TrackIO dashboard stopped")
+            except Exception as e:
+                logger.warning("Error stopping TrackIO dashboard: %s", e)
+            finally:
+                self._app = None
+
+    @property
+    def url(self) -> str | None:
+        """Return the dashboard URL if running."""
+        return self._url
 
 
 class MetricsTracker:
