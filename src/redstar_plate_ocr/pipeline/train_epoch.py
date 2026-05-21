@@ -148,7 +148,7 @@ def _optimizer_step(
     and combined gradient norm (0.0 if no step).
     """
     config = trainer.config
-    if step % config.gradient_accumulation_steps != 0:
+    if (step + 1) % config.gradient_accumulation_steps != 0:
         return step + 1, False, 0.0
 
     grad_clip = config.gradient_clip
@@ -574,6 +574,8 @@ def run_train_epoch(
                 input_lengths=input_lengths,
             )
             batches_since_update = 0
+
+            del output
 
         if trainer._interrupt_requested:
             break

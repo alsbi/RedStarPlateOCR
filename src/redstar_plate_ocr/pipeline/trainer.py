@@ -228,6 +228,13 @@ class Trainer:
             return self.severe_scheduler.std_severity
         return 1.0
 
+    def _maybe_empty_cache(self) -> None:
+        """Empty GPU cache between epochs."""
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
+        elif self.device.type == "mps":
+            torch.mps.empty_cache()
+
     def _get_preprocessing_enabled(self) -> bool:
         """Вернуть флаг preprocessing_enabled из scheduler или True."""
         if self.severe_scheduler is not None and self.config.enable_warmup:
@@ -853,6 +860,7 @@ class Trainer:
                 last_metrics = result.last_metrics
                 patience_counter = result.patience_counter
                 self._best_metrics = best_metrics
+                self._maybe_empty_cache()
 
                 if self._should_stop_epoch(result, epoch, best_metric):
                     break
