@@ -25,6 +25,10 @@ backbone:
   attention: se
   stage2_kernel_size: 5
   stage3_kernel_size: 5
+  stage3_expand_ratio: 2
+  stage2_mlp_ratio: 1
+  stage3_mlp_ratio: 2
+  stage3_norm: group
 
 fusion:
   enabled: true

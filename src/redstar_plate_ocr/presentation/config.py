@@ -31,6 +31,10 @@ _BACKBONE_KEYS = frozenset(
         "attention",
         "stage2_kernel_size",
         "stage3_kernel_size",
+        "stage3_expand_ratio",
+        "stage2_mlp_ratio",
+        "stage3_mlp_ratio",
+        "stage3_norm",
     }
 )
 _LSTM_KEYS = frozenset(

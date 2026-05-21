@@ -29,6 +29,17 @@ def _get_gate_activation(name: str) -> nn.Module:
     raise ValueError(f"Unknown gate activation: {name}")
 
 
+def _make_norm(channels: int, norm_type: str = "batch") -> nn.Module:
+    """Create normalization layer.
+
+    GroupNorm(1, C) ≈ LayerNorm for spatial data (ONNX compatible,
+    opset 11+). BatchNorm2d is the default.
+    """
+    if norm_type == "group":
+        return nn.GroupNorm(1, channels)
+    return nn.BatchNorm2d(channels)
+
+
 @dataclass
 class BackboneOutput:
     """Output of PlateBackbone with intermediate features."""
@@ -79,7 +90,7 @@ class SEAttention(nn.Module):
 
 
 class DWSepBlock(nn.Module):
-    """Depthwise-Separable block with optional attention."""
+    """Depthwise-Separable block with optional attention and MLP."""
 
     def __init__(
         self,
@@ -90,6 +101,8 @@ class DWSepBlock(nn.Module):
         kernel_size: int = 3,
         activation: str = "silu",
         gate_activation: str = "sigmoid",
+        mlp_ratio: int = 1,
+        norm_layer: str = "batch",
     ):
         super().__init__()
         self.dw = nn.Sequential(
@@ -101,7 +114,7 @@ class DWSepBlock(nn.Module):
                 groups=channels,
                 bias=False,
             ),
-            nn.BatchNorm2d(channels),
+            _make_norm(channels, norm_layer),
             _get_activation(activation),
         )
         self.se: SEAttention | None = None
@@ -111,10 +124,19 @@ class DWSepBlock(nn.Module):
                 se_reduction,
                 gate_activation=gate_activation,
             )
-        self.pw = nn.Sequential(
-            nn.Conv2d(channels, channels, 1, bias=False),
-            nn.BatchNorm2d(channels),
-        )
+        if mlp_ratio > 1:
+            mid = channels * mlp_ratio
+            self.pw = nn.Sequential(
+                nn.Conv2d(channels, mid, 1, bias=False),
+                nn.GELU(),
+                nn.Conv2d(mid, channels, 1, bias=False),
+                _make_norm(channels, norm_layer),
+            )
+        else:
+            self.pw = nn.Sequential(
+                nn.Conv2d(channels, channels, 1, bias=False),
+                _make_norm(channels, norm_layer),
+            )
         self.drop_path = DropPath(drop_path_rate)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -123,6 +145,82 @@ class DWSepBlock(nn.Module):
         if self.se is not None:
             out = out * self.se(out)
         out = self.pw(out)
+        out = self.drop_path(out)
+        return out + residual
+
+
+class InvertedResidualBlock(nn.Module):
+    """Inverted residual: expand → DW → SE → project (MobileNetV3-style)."""
+
+    def __init__(
+        self,
+        channels: int,
+        expand_ratio: int = 2,
+        se_reduction: int = 4,
+        drop_path_rate: float = 0.0,
+        kernel_size: int = 5,
+        activation: str = "hardswish",
+        gate_activation: str = "hardsigmoid",
+        mlp_ratio: int = 1,
+        norm_layer: str = "batch",
+    ):
+        super().__init__()
+        mid_channels = channels * expand_ratio
+
+        # Expand: 1×1 conv, channels → mid_channels
+        self.expand = nn.Sequential(
+            nn.Conv2d(channels, mid_channels, 1, bias=False),
+            _make_norm(mid_channels, norm_layer),
+            _get_activation(activation),
+        )
+
+        # Depthwise conv
+        self.dw = nn.Sequential(
+            nn.Conv2d(
+                mid_channels,
+                mid_channels,
+                kernel_size,
+                padding=kernel_size // 2,
+                groups=mid_channels,
+                bias=False,
+            ),
+            _make_norm(mid_channels, norm_layer),
+            _get_activation(activation),
+        )
+
+        # SE attention on mid_channels
+        self.se: SEAttention | None = None
+        if gate_activation != "none":
+            self.se = SEAttention(
+                mid_channels,
+                se_reduction,
+                gate_activation=gate_activation,
+            )
+
+        # Project: mid_channels → channels (NO activation — linear bottleneck)
+        if mlp_ratio > 1:
+            project_mid = channels * mlp_ratio
+            self.project = nn.Sequential(
+                nn.Conv2d(mid_channels, project_mid, 1, bias=False),
+                nn.GELU(),
+                nn.Conv2d(project_mid, channels, 1, bias=False),
+                _make_norm(channels, norm_layer),
+            )
+        else:
+            self.project = nn.Sequential(
+                nn.Conv2d(mid_channels, channels, 1, bias=False),
+                _make_norm(channels, norm_layer),
+            )
+
+        self.drop_path = DropPath(drop_path_rate)
+
+    def forward(self, x: Tensor) -> Tensor:
+        residual = x
+        out = self.expand(x)
+        out = self.dw(out)
+        if self.se is not None:
+            out = out * self.se(out)
+        out = self.project(out)
         out = self.drop_path(out)
         return out + residual
 
@@ -146,6 +244,10 @@ class PlateBackbone(nn.Module):
         gate_activation: str = "sigmoid",
         stage2_kernel_size: int = 3,
         stage3_kernel_size: int = 3,
+        stage3_expand_ratio: int = 1,
+        stage2_mlp_ratio: int = 1,
+        stage3_mlp_ratio: int = 1,
+        stage3_norm: str = "batch",
     ):
         super().__init__()
         self._final_channels = stage3_channels or stage2_channels
@@ -177,6 +279,7 @@ class PlateBackbone(nn.Module):
             activation=activation,
             gate_activation=gate_activation,
             kernel_size=stage2_kernel_size,
+            mlp_ratio=stage2_mlp_ratio,
         )
         s3_ch = stage3_channels or stage2_channels
         if stage3_channels is not None and stage3_channels != stage2_channels:
@@ -195,6 +298,9 @@ class PlateBackbone(nn.Module):
             activation=activation,
             gate_activation=gate_activation,
             kernel_size=stage3_kernel_size,
+            expand_ratio=stage3_expand_ratio,
+            mlp_ratio=stage3_mlp_ratio,
+            norm_layer=stage3_norm,
         )
 
     @property
@@ -238,26 +344,52 @@ class PlateBackbone(nn.Module):
         activation: str = "silu",
         gate_activation: str = "sigmoid",
         kernel_size: int = 3,
+        block_cls: type | None = None,
+        expand_ratio: int = 1,
+        mlp_ratio: int = 1,
+        norm_layer: str = "batch",
     ) -> nn.Sequential:
         rates: list[float] = (
             drop_path
             if isinstance(drop_path, list)
             else [drop_path] * num_blocks
         )
-        return nn.Sequential(
-            *[
-                DWSepBlock(
-                    channels,
-                    se_reduction,
-                    drop_path_rate=rates[offset + i],
-                    attention=attention,
-                    kernel_size=kernel_size,
-                    activation=activation,
-                    gate_activation=gate_activation,
+        if block_cls is None:
+            block_cls = (
+                InvertedResidualBlock if expand_ratio > 1 else DWSepBlock
+            )
+        blocks: list[nn.Module] = []
+        for i in range(num_blocks):
+            rate = rates[offset + i]
+            if block_cls is DWSepBlock:
+                blocks.append(
+                    DWSepBlock(
+                        channels,
+                        se_reduction,
+                        drop_path_rate=rate,
+                        attention=attention,
+                        kernel_size=kernel_size,
+                        activation=activation,
+                        gate_activation=gate_activation,
+                        mlp_ratio=mlp_ratio,
+                        norm_layer=norm_layer,
+                    )
                 )
-                for i in range(num_blocks)
-            ]
-        )
+            else:
+                blocks.append(
+                    InvertedResidualBlock(
+                        channels,
+                        expand_ratio=expand_ratio,
+                        se_reduction=se_reduction,
+                        drop_path_rate=rate,
+                        kernel_size=kernel_size,
+                        activation=activation,
+                        gate_activation=gate_activation,
+                        mlp_ratio=mlp_ratio,
+                        norm_layer=norm_layer,
+                    )
+                )
+        return nn.Sequential(*blocks)
 
     @staticmethod
     def _build_down(
