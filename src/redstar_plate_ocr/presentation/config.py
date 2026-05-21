@@ -25,8 +25,12 @@ _BACKBONE_KEYS = frozenset(
         "stage3_channels",
         "stage3_blocks",
         "se_reduction",
+        "activation",
+        "gate_activation",
         "drop_path_rate",
         "attention",
+        "stage2_kernel_size",
+        "stage3_kernel_size",
     }
 )
 _LSTM_KEYS = frozenset(

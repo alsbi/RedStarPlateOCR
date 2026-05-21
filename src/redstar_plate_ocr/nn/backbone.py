@@ -9,6 +9,26 @@ import torch.nn as nn
 from torch import Tensor
 
 
+def _get_activation(name: str) -> nn.Module:
+    """Return activation module by name."""
+    if name == "silu":
+        return nn.SiLU(inplace=True)
+    if name in ("hardswish", "hard_swish"):
+        return nn.Hardswish(inplace=True)
+    if name == "relu":
+        return nn.ReLU(inplace=True)
+    raise ValueError(f"Unknown activation: {name}")
+
+
+def _get_gate_activation(name: str) -> nn.Module:
+    """Return gate activation module by name."""
+    if name == "sigmoid":
+        return nn.Sigmoid()
+    if name in ("hardsigmoid", "hard_sigmoid"):
+        return nn.Hardsigmoid(inplace=True)
+    raise ValueError(f"Unknown gate activation: {name}")
+
+
 @dataclass
 class BackboneOutput:
     """Output of PlateBackbone with intermediate features."""
@@ -40,6 +60,7 @@ class SEAttention(nn.Module):
         self,
         channels: int,
         reduction: int = 4,
+        gate_activation: str = "sigmoid",
     ) -> None:
         super().__init__()
         mid = channels // reduction
@@ -47,13 +68,13 @@ class SEAttention(nn.Module):
         self.fc1 = nn.Linear(channels, mid)
         self.act = nn.ReLU(inplace=True)
         self.fc2 = nn.Linear(mid, channels)
-        self.sigmoid = nn.Sigmoid()
+        self.gate = _get_gate_activation(gate_activation)
 
     def forward(self, x: Tensor) -> Tensor:
         b, c, _, _ = x.shape
         scale = self.pool(x).view(b, c)
         scale = self.act(self.fc1(scale))
-        scale = self.sigmoid(self.fc2(scale))
+        scale = self.gate(self.fc2(scale))
         return scale.view(b, c, 1, 1)
 
 
@@ -66,23 +87,30 @@ class DWSepBlock(nn.Module):
         se_reduction: int = 4,
         drop_path_rate: float = 0.0,
         attention: str = "se",
+        kernel_size: int = 3,
+        activation: str = "silu",
+        gate_activation: str = "sigmoid",
     ):
         super().__init__()
         self.dw = nn.Sequential(
             nn.Conv2d(
                 channels,
                 channels,
-                3,
-                padding=1,
+                kernel_size,
+                padding=kernel_size // 2,
                 groups=channels,
                 bias=False,
             ),
             nn.BatchNorm2d(channels),
-            nn.SiLU(inplace=True),
+            _get_activation(activation),
         )
         self.se: SEAttention | None = None
         if attention == "se":
-            self.se = SEAttention(channels, se_reduction)
+            self.se = SEAttention(
+                channels,
+                se_reduction,
+                gate_activation=gate_activation,
+            )
         self.pw = nn.Sequential(
             nn.Conv2d(channels, channels, 1, bias=False),
             nn.BatchNorm2d(channels),
@@ -114,26 +142,47 @@ class PlateBackbone(nn.Module):
         se_reduction: int = 4,
         drop_path_rate: float = 0.05,
         attention: str = "se",
+        activation: str = "silu",
+        gate_activation: str = "sigmoid",
+        stage2_kernel_size: int = 3,
+        stage3_kernel_size: int = 3,
     ):
         super().__init__()
         self._final_channels = stage3_channels or stage2_channels
-        self.stem = self._build_stem(stem_channels)
+        self.stem = self._build_stem(stem_channels, activation)
         self._stem_to_stage1 = self._build_stem_to_stage1(
-            stem_channels, stage1_channels
+            stem_channels, stage1_channels, activation
         )
         self.stage1 = self._build_stage(
-            stage1_channels, se_reduction, 0.0, attention, stage1_blocks
+            stage1_channels,
+            se_reduction,
+            0.0,
+            attention,
+            stage1_blocks,
+            activation=activation,
+            gate_activation=gate_activation,
         )
-        self.down = self._build_down(stage1_channels, stage2_channels)
+        self.down = self._build_down(
+            stage1_channels, stage2_channels, activation
+        )
         dp_rates = self._compute_dp_rates(
             stage2_blocks, stage3_blocks, drop_path_rate
         )
         self.stage2 = self._build_stage(
-            stage2_channels, se_reduction, dp_rates, attention, stage2_blocks
+            stage2_channels,
+            se_reduction,
+            dp_rates,
+            attention,
+            stage2_blocks,
+            activation=activation,
+            gate_activation=gate_activation,
+            kernel_size=stage2_kernel_size,
         )
         s3_ch = stage3_channels or stage2_channels
         if stage3_channels is not None and stage3_channels != stage2_channels:
-            self.expand_stage3 = self._build_expand(stage2_channels, s3_ch)
+            self.expand_stage3 = self._build_expand(
+                stage2_channels, s3_ch, activation
+            )
         else:
             self.expand_stage3 = None
         self.stage3 = self._build_stage(
@@ -143,6 +192,9 @@ class PlateBackbone(nn.Module):
             attention,
             stage3_blocks,
             offset=stage2_blocks,
+            activation=activation,
+            gate_activation=gate_activation,
+            kernel_size=stage3_kernel_size,
         )
 
     @property
@@ -151,23 +203,28 @@ class PlateBackbone(nn.Module):
         return self._final_channels
 
     @staticmethod
-    def _build_stem(channels: int) -> nn.Sequential:
+    def _build_stem(
+        channels: int,
+        activation: str = "silu",
+    ) -> nn.Sequential:
         return nn.Sequential(
             nn.Conv2d(3, channels, 3, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(channels),
-            nn.SiLU(inplace=True),
+            _get_activation(activation),
         )
 
     @staticmethod
     def _build_stem_to_stage1(
-        stem_channels: int, stage1_channels: int
+        stem_channels: int,
+        stage1_channels: int,
+        activation: str = "silu",
     ) -> nn.Module:
         if stem_channels == stage1_channels:
             return nn.Identity()
         return nn.Sequential(
             nn.Conv2d(stem_channels, stage1_channels, 1, bias=False),
             nn.BatchNorm2d(stage1_channels),
-            nn.SiLU(inplace=True),
+            _get_activation(activation),
         )
 
     @staticmethod
@@ -178,6 +235,9 @@ class PlateBackbone(nn.Module):
         attention: str,
         num_blocks: int,
         offset: int = 0,
+        activation: str = "silu",
+        gate_activation: str = "sigmoid",
+        kernel_size: int = 3,
     ) -> nn.Sequential:
         rates: list[float] = (
             drop_path
@@ -191,13 +251,20 @@ class PlateBackbone(nn.Module):
                     se_reduction,
                     drop_path_rate=rates[offset + i],
                     attention=attention,
+                    kernel_size=kernel_size,
+                    activation=activation,
+                    gate_activation=gate_activation,
                 )
                 for i in range(num_blocks)
             ]
         )
 
     @staticmethod
-    def _build_down(in_channels: int, out_channels: int) -> nn.Sequential:
+    def _build_down(
+        in_channels: int,
+        out_channels: int,
+        activation: str = "silu",
+    ) -> nn.Sequential:
         return nn.Sequential(
             nn.Conv2d(
                 in_channels,
@@ -209,19 +276,23 @@ class PlateBackbone(nn.Module):
                 bias=False,
             ),
             nn.BatchNorm2d(in_channels),
-            nn.SiLU(inplace=True),
+            _get_activation(activation),
             nn.Conv2d(in_channels, out_channels, 1, bias=False),
             nn.BatchNorm2d(out_channels),
-            nn.SiLU(inplace=True),
+            _get_activation(activation),
         )
 
     @staticmethod
-    def _build_expand(in_channels: int, out_channels: int) -> nn.Sequential:
+    def _build_expand(
+        in_channels: int,
+        out_channels: int,
+        activation: str = "silu",
+    ) -> nn.Sequential:
         """1×1 conv expand from stage2 to stage3 channels."""
         return nn.Sequential(
             nn.Conv2d(in_channels, out_channels, 1, bias=False),
             nn.BatchNorm2d(out_channels),
-            nn.SiLU(inplace=True),
+            _get_activation(activation),
         )
 
     @staticmethod

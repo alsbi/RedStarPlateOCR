@@ -124,7 +124,7 @@ class TestSEAttention:
         assert out.shape == (2, 64, 1, 1)
 
     def test_values_between_zero_and_one(self) -> None:
-        """SE output values are in [0, 1] (sigmoid)."""
+        """SE output values are in [0, 1] regardless of gate type."""
         se = SEAttention(channels=64, reduction=4)
         x = torch.randn(2, 64, 10, 24)
         out = se(x)
