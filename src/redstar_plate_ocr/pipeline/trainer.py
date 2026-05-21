@@ -21,6 +21,7 @@ from redstar_plate_ocr.data.augmentation import (
 )
 from redstar_plate_ocr.data.dataloader import build_dataloader
 from redstar_plate_ocr.data.dataset import PlateDataset
+from redstar_plate_ocr.data.severe_aug import SevereAugScheduler
 from redstar_plate_ocr.nn.losses import CombinedLoss
 from redstar_plate_ocr.nn.model import PlateOCRModel
 from redstar_plate_ocr.pipeline.checkpoint import (
@@ -34,6 +35,7 @@ from redstar_plate_ocr.pipeline.process_epoch import (
     process_epoch,
 )
 from redstar_plate_ocr.pipeline.progress_display import ProgressDisplay
+from redstar_plate_ocr.pipeline.tracking import MetricsTracker
 from redstar_plate_ocr.pipeline.train_epoch import run_train_epoch
 from redstar_plate_ocr.pipeline.training_config import TrainingConfig
 from redstar_plate_ocr.pipeline.utils import format_duration
@@ -164,7 +166,9 @@ class Trainer:
             length_weight=self.config.length_weight,
         )
         self.evaluator = Evaluator(
-            plate_config, self.device, beam_width=1,
+            plate_config,
+            self.device,
+            beam_width=1,
         )
         self.scaler = torch.amp.GradScaler(
             self.device.type,
@@ -173,7 +177,7 @@ class Trainer:
 
         preproc = cfg.get("preprocessing", {})
         self.canvas_h = preproc.get("canvas_height", 80)
-        self.canvas_w = preproc.get("canvas_width", 192)
+        self.canvas_w = preproc.get("canvas_width", 256)
         self.pad_color = preproc.get("pad_color", 128)
         norm = preproc.get("normalization", {})
         self.mean = norm.get("mean", _IMAGENET_MEAN)
@@ -184,6 +188,24 @@ class Trainer:
         self._interrupt_requested: bool = False
         self._save_thread: threading.Thread | None = None
         self.start_epoch: int = 0
+
+        # Severe augmentation scheduler for adaptive warmup
+        if self.config.enable_warmup:
+            self.severe_scheduler = SevereAugScheduler(
+                initial_severity=self.config.initial_severity,
+                threshold_disable_severe=(
+                    self.config.threshold_disable_severe
+                ),
+                severe_step=self.config.severe_step,
+                patience_severe=self.config.patience_severe,
+                severe_threshold_std_start=(
+                    self.config.severe_threshold_std_start
+                ),
+                severe_midpoint=self.config.severe_midpoint,
+                early_stop_patience=(self.config.early_stop_patience),
+            )
+        else:
+            self.severe_scheduler = None
 
     @property
     def epochs(self) -> int:
@@ -200,7 +222,22 @@ class Trainer:
         """Batch size."""
         return self.config.batch_size
 
-    def _build_base_pipeline(self) -> PreprocessPipeline:
+    def _get_std_severity(self) -> float:
+        """Вернуть текущую std_severity из scheduler или 1.0."""
+        if self.severe_scheduler is not None and self.config.enable_warmup:
+            return self.severe_scheduler.std_severity
+        return 1.0
+
+    def _get_preprocessing_enabled(self) -> bool:
+        """Вернуть флаг preprocessing_enabled из scheduler или True."""
+        if self.severe_scheduler is not None and self.config.enable_warmup:
+            return self.severe_scheduler.preprocessing_enabled
+        return True
+
+    def _build_base_pipeline(
+        self,
+        enhancement_enabled: bool = True,
+    ) -> PreprocessPipeline:
         """Create base preprocessing pipeline."""
         return PreprocessPipeline(
             canvas_height=self.canvas_h,
@@ -209,15 +246,19 @@ class Trainer:
             mean=self.mean,
             std=self.std,
             enhancement_config=self.enhancement_cfg,
+            enhancement_enabled=enhancement_enabled,
         )
 
     def _build_single_aug_pipeline(
         self,
+        severity: float = 1.0,
+        enhancement_enabled: bool = True,
     ) -> PreprocessPipeline:
         """Create pipeline with exactly 1 random augmentation."""
         augmentation = build_single_augmentation(
             self.aug_cfg,
             is_train=True,
+            severity=severity,
         )
         return PreprocessPipeline(
             canvas_height=self.canvas_h,
@@ -226,16 +267,21 @@ class Trainer:
             mean=self.mean,
             std=self.std,
             augmentation=augmentation,
+            enhancement_config=self.enhancement_cfg,
+            enhancement_enabled=enhancement_enabled,
         )
 
     def _build_multi_aug_pipeline(
         self,
+        severity: float = 1.0,
+        enhancement_enabled: bool = True,
     ) -> PreprocessPipeline:
         """Create pipeline with random 2+ augmentations."""
         augmentation = build_multi_augmentation(
             self.aug_cfg,
             is_train=True,
             min_aug=self.config.multi_aug_min,
+            severity=severity,
         )
         return PreprocessPipeline(
             canvas_height=self.canvas_h,
@@ -244,6 +290,43 @@ class Trainer:
             mean=self.mean,
             std=self.std,
             augmentation=augmentation,
+            enhancement_config=self.enhancement_cfg,
+            enhancement_enabled=enhancement_enabled,
+        )
+
+    def _build_severe_aug_pipeline(
+        self,
+    ) -> PreprocessPipeline:
+        """Create pipeline with severe augmentation."""
+        import albumentations as A
+
+        from redstar_plate_ocr.data.severe_aug import severe_aug
+
+        scheduler = self.severe_scheduler
+
+        def _apply_severe(
+            image,
+            **kwargs,
+        ):
+            return severe_aug(image, scheduler.get_intensity())
+
+        augmentation = A.Compose(
+            [
+                A.Lambda(
+                    image=_apply_severe,
+                    name="severe_aug",
+                    p=1.0,
+                ),
+            ]
+        )
+        return PreprocessPipeline(
+            canvas_height=self.canvas_h,
+            canvas_width=self.canvas_w,
+            pad_color=self.pad_color,
+            mean=self.mean,
+            std=self.std,
+            augmentation=augmentation,
+            enhancement_enabled=False,
         )
 
     def _make_filtered_dataset(
@@ -257,6 +340,7 @@ class Trainer:
             _balance_per_group,
             _oversample_square,
         )
+
         ds = PlateDataset(
             csv_path=self.train_dataset.csv_path,
             dataset_root=self.train_dataset.dataset_root,
@@ -268,7 +352,8 @@ class Trainer:
             ds = _balance_per_group(ds)
         if self.config.square_oversample_ratio > 0:
             ds = _oversample_square(
-                ds, self.config.square_oversample_ratio,
+                ds,
+                self.config.square_oversample_ratio,
             )
         return ds
 
@@ -279,15 +364,29 @@ class Trainer:
         """Build train dataloader for the given augmentation phase.
 
         Phases:
-            "none"   → only originals (warmup / final polish)
-            "single" → originals + 1 copy with exactly 1 random aug
-            "full"   → originals + single + num_multi_aug multi-aug copies
+            "none"           → only originals (warmup / final polish)
+            "severe_warmup"  → originals + 1 copy with severe augmentation
+            "single"         → originals + 1 copy with exactly 1 random aug
+            "full"           → originals + single + num_multi_aug multi-aug
+
+        When ``enable_warmup=True``, the scheduler controls:
+        - ``std_severity`` — strength of standard augmentations (0–1).
+        - ``preprocessing_enabled`` — whether enhancement filters run.
 
         ``original_prob`` controls how likely each original (non-augmented)
-        sample is included per epoch.  In phase "none" it is always 1.0.
+        sample is included per epoch.  In phases "none" and
+        "severe_warmup" it is always 1.0.
         """
         allowed = self.plate_config.country_list
-        base_pipeline = self._build_base_pipeline()
+
+        # Получаем параметры из scheduler (или дефолты при
+        # enable_warmup=False)
+        std_sev = self._get_std_severity()
+        preproc_on = self._get_preprocessing_enabled()
+
+        base_pipeline = self._build_base_pipeline(
+            enhancement_enabled=preproc_on,
+        )
 
         # Warmup: balance per group for equal exposure
         do_balance = phase == "none"
@@ -295,12 +394,51 @@ class Trainer:
         # In phase "none" (warmup / final polish) always use all
         # originals — no stochastic subsampling.
         orig_prob = (
-            1.0 if phase == "none" else self.config.original_prob
+            1.0
+            if phase in ("none", "severe_warmup")
+            else self.config.original_prob
         )
+
+        if phase == "severe_warmup":
+            from redstar_plate_ocr.data.dataloader import (
+                _ConcatDatasetWithSamples,
+            )
+
+            datasets = [
+                self._make_filtered_dataset(
+                    base_pipeline,
+                    allowed,
+                    balance=True,
+                )
+            ]
+            severe_pipeline = self._build_severe_aug_pipeline()
+            logger.info(
+                "Severe warmup: intensity=%.1f, "
+                "std_severity=%.2f, preprocessing=%s",
+                self.severe_scheduler.get_intensity(),
+                std_sev,
+                "on" if preproc_on else "off",
+            )
+            datasets.append(
+                self._make_filtered_dataset(
+                    severe_pipeline,
+                    allowed,
+                )
+            )
+            concat_ds = _ConcatDatasetWithSamples(datasets)
+            return build_dataloader(
+                concat_ds,
+                batch_size=self.config.batch_size,
+                num_workers=self.config.num_workers,
+                is_train=True,
+                device=self.device,
+            )
 
         if phase == "none":
             train_ds = self._make_filtered_dataset(
-                base_pipeline, allowed, balance=do_balance,
+                base_pipeline,
+                allowed,
+                balance=do_balance,
             )
             return build_dataloader(
                 train_ds,
@@ -318,30 +456,40 @@ class Trainer:
         original_len = len(datasets[0])
 
         # 1 copy: exactly 1 random augmentation
-        single_pipeline = self._build_single_aug_pipeline()
+        single_pipeline = self._build_single_aug_pipeline(
+            severity=std_sev,
+            enhancement_enabled=preproc_on,
+        )
         if single_pipeline.augmentation is not None:
             logger.info(
-                "Augmentations (single): %s",
+                "Augmentations (single, severity=%.2f): %s",
+                std_sev,
                 single_pipeline.get_aug_description(),
             )
             datasets.append(
                 self._make_filtered_dataset(
-                    single_pipeline, allowed,
+                    single_pipeline,
+                    allowed,
                 ),
             )
 
         # num_multi_aug copies: random 2+ augmentations each
         if phase == "full":
             for _ in range(self.config.num_multi_aug):
-                multi_pipeline = self._build_multi_aug_pipeline()
+                multi_pipeline = self._build_multi_aug_pipeline(
+                    severity=std_sev,
+                    enhancement_enabled=preproc_on,
+                )
                 if multi_pipeline.augmentation is not None:
                     logger.info(
-                        "Augmentations (multi): %s",
+                        "Augmentations (multi, severity=%.2f): %s",
+                        std_sev,
                         multi_pipeline.get_aug_description(),
                     )
                     datasets.append(
                         self._make_filtered_dataset(
-                            multi_pipeline, allowed,
+                            multi_pipeline,
+                            allowed,
                         ),
                     )
 
@@ -400,6 +548,13 @@ class Trainer:
         if not hasattr(self, "run_dir") or self.run_dir is None:
             self.run_dir = Path(self.output_dir) / "interrupted"
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        extra: dict = {
+            "country_optimizer_state_dict": (
+                self.country_optimizer.state_dict()
+            ),
+        }
+        if self.severe_scheduler is not None:
+            extra["severe_scheduler"] = self.severe_scheduler.state_dict()
         ckpt = build_checkpoint(
             epoch=epoch,
             model_state=self.model.state_dict(),
@@ -409,7 +564,7 @@ class Trainer:
             best_metric=best_metric,
             plate_config_yaml=self.plate_config.to_yaml_string(),
             interrupted=True,
-            country_optimizer_state_dict=self.country_optimizer.state_dict(),
+            **extra,
         )
         path = self.run_dir / f"interrupted_epoch{epoch + 1}.pt"
         try:
@@ -448,6 +603,18 @@ class Trainer:
             self.config.es_patience,
             self.config.es_mode,
         )
+        if self.config.enable_warmup:
+            logger.info(
+                "Warmup scheduler: initial_severity=%.2f, "
+                "threshold=%.2f, step=%.3f, "
+                "patience_severe=%d, "
+                "early_stop_patience=%d",
+                self.config.initial_severity,
+                self.config.threshold_disable_severe,
+                self.config.severe_step,
+                self.config.patience_severe,
+                self.config.early_stop_patience,
+            )
 
     def train(self) -> dict:
         """Run training loop, return best metrics."""
@@ -455,6 +622,17 @@ class Trainer:
         run_dir = create_run_dir(self.output_dir)
         self.run_dir = run_dir
         logger.info("Run directory: %s", run_dir)
+
+        # Initialize metrics tracker (TrackIO or console fallback)
+        run_name = self.config.trackio_name or run_dir.name
+        from dataclasses import asdict
+
+        self.tracker = MetricsTracker(
+            enabled=self.config.trackio_enabled,
+            project=self.config.trackio_project,
+            name=run_name,
+            config=asdict(self.config),
+        )
 
         file_handler = logging.FileHandler(run_dir / "train.log")
         file_handler.setLevel(logging.DEBUG)
@@ -475,6 +653,7 @@ class Trainer:
                     best_metrics.get("val_cer", 0.0),
                 )
         finally:
+            self.tracker.finish()
             signal.signal(signal.SIGINT, signal.SIG_IGN)
             logging.getLogger().removeHandler(file_handler)
             file_handler.close()
@@ -490,11 +669,18 @@ class Trainer:
     def _compute_aug_phase(self, epoch: int) -> str:
         """Compute augmentation phase for the given epoch.
 
-        Returns one of: "none", "single", "full".
+        Returns one of: "none", "severe_warmup", "single", "full".
         """
         # Final polish: no augmentation
         if epoch >= self.config.epochs - self.config.no_aug_epochs:
             return "none"
+        # Adaptive severe warmup: active while scheduler has severity
+        if (
+            self.config.enable_warmup
+            and self.severe_scheduler is not None
+            and self.severe_scheduler.severe_severity > 0
+        ):
+            return "severe_warmup"
         # Warmup: no augmentation
         if epoch < self.config.warmup_epochs:
             return "none"
@@ -579,7 +765,10 @@ class Trainer:
         epoch_times.append(time.monotonic() - epoch_start)
         progress_display.update_epoch_summary(result.epoch_stats)
         self._update_eta(
-            epoch, epoch_times, result.epoch_stats, progress_display,
+            epoch,
+            epoch_times,
+            result.epoch_stats,
+            progress_display,
         )
         return result, epoch_start, epoch_times
 
@@ -638,7 +827,9 @@ class Trainer:
             epoch_times: list[float] = []
             for epoch in range(self.start_epoch, self.config.epochs):
                 train_loader, _loader_phase = self._resolve_train_loader(
-                    epoch, train_loader, _loader_phase,
+                    epoch,
+                    train_loader,
+                    _loader_phase,
                 )
                 assert train_loader is not None
                 result, _, epoch_times = self._run_one_epoch(
@@ -709,6 +900,8 @@ class Trainer:
             best_metrics,
             patience_counter,
             epoch_start=epoch_start,
+            severe_scheduler=self.severe_scheduler,
+            tracker=getattr(self, "tracker", None),
         )
 
     def _train_epoch(
@@ -719,6 +912,9 @@ class Trainer:
         task_id: "TaskID",
         epoch_start: float = 0.0,
         current_epoch: int = 0,
+        tracker: MetricsTracker | None = None,
+        log_interval: int = 20,
+        log_grad_interval: int = 100,
     ) -> dict[str, float]:
         """Run one training epoch — delegates to train_epoch module."""
         return run_train_epoch(
@@ -729,6 +925,9 @@ class Trainer:
             task_id,
             epoch_start=epoch_start,
             current_epoch=current_epoch,
+            tracker=tracker,
+            log_interval=log_interval,
+            log_grad_interval=log_grad_interval,
         )
 
     def _save_checkpoint(
@@ -738,6 +937,13 @@ class Trainer:
         metric: float,
     ) -> None:
         """Save model checkpoint to run directory (async)."""
+        extra: dict = {
+            "country_optimizer_state_dict": (
+                self.country_optimizer.state_dict()
+            ),
+        }
+        if self.severe_scheduler is not None:
+            extra["severe_scheduler"] = self.severe_scheduler.state_dict()
         ckpt = build_checkpoint(
             epoch=epoch,
             model_state=self.model.state_dict(),
@@ -746,7 +952,7 @@ class Trainer:
             scaler_state=self.scaler.state_dict(),
             best_metric=metric,
             plate_config_yaml=self.plate_config.to_yaml_string(),
-            country_optimizer_state_dict=self.country_optimizer.state_dict(),
+            **extra,
         )
         run_dir = getattr(self, "run_dir", self.output_dir)
         path = run_dir / name

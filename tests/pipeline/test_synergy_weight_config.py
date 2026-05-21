@@ -30,4 +30,4 @@ def test_synergy_weight_from_yaml_config():
     yaml_path = Path("configs/model.yaml")
     cfg_raw = yaml.safe_load(yaml_path.read_text())
     cfg = TrainingConfig.from_dict(cfg_raw)
-    assert cfg.synergy_weight == 0.3
+    assert cfg.synergy_weight == 0.6

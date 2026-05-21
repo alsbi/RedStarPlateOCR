@@ -23,11 +23,11 @@ from redstar_plate_ocr.plate.config import PlateConfig
 
 
 def test_backbone_shape():
-    """(2,3,80,192) -> BackboneOutput with final (2,256,20,48)."""
+    """(2,3,80,256) -> BackboneOutput with final (2,256,20,64)."""
     model = PlateBackbone()
-    x = torch.randn(2, 3, 80, 192)
+    x = torch.randn(2, 3, 80, 256)
     out = model(x)
-    assert out.final.shape == (2, 256, 20, 48)
+    assert out.final.shape == (2, 256, 20, 64)
 
 
 def test_backbone_param_count():
@@ -40,25 +40,19 @@ def test_backbone_param_count():
 # T3.2: Classification Heads
 
 
-def _make_mask(
-    orig_h: torch.Tensor, orig_w: torch.Tensor
-) -> torch.Tensor:
+def _make_mask(orig_h: torch.Tensor, orig_w: torch.Tensor) -> torch.Tensor:
     """Shortcut to compute content_mask with default feat params."""
-    return compute_content_mask(
-        orig_h, orig_w, feat_h=20, feat_w=48, stride=4
-    )
+    return compute_content_mask(orig_h, orig_w, feat_h=20, feat_w=64, stride=4)
 
 
 def test_format_head_shape():
     """FormatHead uses content_mask + plate dims, not visual features."""
     head = FormatHead(in_channels=256)
-    x = torch.randn(2, 256, 20, 48)
+    x = torch.randn(2, 256, 20, 64)
     orig_h = torch.tensor([80, 60], dtype=torch.int64)
-    orig_w = torch.tensor([192, 192], dtype=torch.int64)
+    orig_w = torch.tensor([256, 256], dtype=torch.int64)
     cmask = _make_mask(orig_h, orig_w)
-    out = head(
-        x, content_mask=cmask, orig_h=orig_h, orig_w=orig_w
-    )
+    out = head(x, content_mask=cmask, orig_h=orig_h, orig_w=orig_w)
     assert out.shape == (2, 2)
 
 
@@ -67,19 +61,15 @@ def test_format_head_ignores_visual_features():
     head = FormatHead(in_channels=256)
     head.eval()
     orig_h = torch.tensor([80], dtype=torch.int64)
-    orig_w = torch.tensor([192], dtype=torch.int64)
+    orig_w = torch.tensor([256], dtype=torch.int64)
     cmask = _make_mask(orig_h, orig_w)
 
-    x1 = torch.randn(1, 256, 20, 48)
-    x2 = torch.randn(1, 256, 20, 48)  # different pixels
+    x1 = torch.randn(1, 256, 20, 64)
+    x2 = torch.randn(1, 256, 20, 64)  # different pixels
 
     with torch.no_grad():
-        out1 = head(
-            x1, content_mask=cmask, orig_h=orig_h, orig_w=orig_w
-        )
-        out2 = head(
-            x2, content_mask=cmask, orig_h=orig_h, orig_w=orig_w
-        )
+        out1 = head(x1, content_mask=cmask, orig_h=orig_h, orig_w=orig_w)
+        out2 = head(x2, content_mask=cmask, orig_h=orig_h, orig_w=orig_w)
 
     # Same plate dims → same logits regardless of features
     assert torch.allclose(out1, out2, atol=1e-6), (
@@ -91,10 +81,10 @@ def test_format_head_different_dims_different_output():
     """Different plate dimensions produce different format predictions."""
     head = FormatHead(in_channels=256)
     head.eval()
-    x = torch.randn(1, 256, 20, 48)
+    x = torch.randn(1, 256, 20, 64)
 
     orig_h_std = torch.tensor([80], dtype=torch.int64)
-    orig_w_std = torch.tensor([192], dtype=torch.int64)
+    orig_w_std = torch.tensor([256], dtype=torch.int64)
     orig_h_sq = torch.tensor([80], dtype=torch.int64)
     orig_w_sq = torch.tensor([80], dtype=torch.int64)
 
@@ -103,12 +93,16 @@ def test_format_head_different_dims_different_output():
 
     with torch.no_grad():
         out_std = head(
-            x, content_mask=mask_std,
-            orig_h=orig_h_std, orig_w=orig_w_std,
+            x,
+            content_mask=mask_std,
+            orig_h=orig_h_std,
+            orig_w=orig_w_std,
         )
         out_sq = head(
-            x, content_mask=mask_sq,
-            orig_h=orig_h_sq, orig_w=orig_w_sq,
+            x,
+            content_mask=mask_sq,
+            orig_h=orig_h_sq,
+            orig_w=orig_w_sq,
         )
 
     assert not torch.allclose(out_std, out_sq, atol=1e-6), (
@@ -142,9 +136,9 @@ def test_country_head_ignores_padding():
 
 
 def test_country_head_shape():
-    """(2,256,20,48) -> (2,7)."""
+    """(2,256,20,64) -> (2,7)."""
     head = CountryHead(in_channels=256, num_countries=7)
-    x = torch.randn(2, 256, 20, 48)
+    x = torch.randn(2, 256, 20, 64)
     out = head(x)
     assert out.shape == (2, 7)
 
@@ -153,8 +147,12 @@ def test_country_head_pos_aware_ignores_padding():
     """PositionAwareCountryHead with content_mask: padding region does
     not affect logits.  Changing padding values must not change output."""
     head = PositionAwareCountryHead(
-        in_channels=64, num_countries=7, conv_channels=32,
-        grid_rows=2, grid_cols=3, hidden_size=64,
+        in_channels=64,
+        num_countries=7,
+        conv_channels=32,
+        grid_rows=2,
+        grid_cols=3,
+        hidden_size=64,
     )
     head.eval()
 
@@ -184,37 +182,37 @@ def test_country_head_pos_aware_ignores_padding():
 
 
 def test_compression_standard():
-    """(2,256,20,48) + orig dims -> (2,48,256)."""
+    """(2,256,20,64) + orig dims -> (2,64,256)."""
     comp = AdaptiveCompression(in_channels=256)
-    features = torch.randn(2, 256, 20, 48)
+    features = torch.randn(2, 256, 20, 64)
     orig_h = torch.tensor([80, 80])
-    orig_w = torch.tensor([192, 192])
+    orig_w = torch.tensor([256, 256])
     out = comp.forward_standard(features, orig_h, orig_w)
-    assert out.shape == (2, 48, 256)
+    assert out.shape == (2, 64, 256)
 
 
 def test_compression_square():
-    """(2,256,20,48) + orig dims -> (2,96,256)."""
+    """(2,256,20,64) + orig dims -> (2,128,256)."""
     comp = AdaptiveCompression(in_channels=256)
-    features = torch.randn(2, 256, 20, 48)
+    features = torch.randn(2, 256, 20, 64)
     orig_h = torch.tensor([80, 80])
-    orig_w = torch.tensor([192, 192])
+    orig_w = torch.tensor([256, 256])
     out = comp.forward_square(features, orig_h, orig_w)
-    assert out.shape == (2, 96, 256)
+    assert out.shape == (2, 128, 256)
 
 
 def test_content_mask():
-    """orig_h=80, orig_w=192 -> mask all 1.0."""
+    """orig_h=80, orig_w=256 -> mask all 1.0."""
     orig_h = torch.tensor([80, 80])
-    orig_w = torch.tensor([192, 192])
+    orig_w = torch.tensor([256, 256])
     mask = compute_content_mask(
         orig_h,
         orig_w,
         feat_h=20,
-        feat_w=48,
+        feat_w=64,
         stride=4,
     )
-    assert mask.shape == (2, 1, 20, 48)
+    assert mask.shape == (2, 1, 20, 64)
     assert (mask == 1.0).all()
 
 
@@ -222,19 +220,19 @@ def test_content_mask():
 
 
 def test_bilstm_standard():
-    """(2,48,256) -> (2,48,512)."""
+    """(2,64,256) -> (2,64,512)."""
     model = PlateBiLSTM(input_size=256, hidden_size=256)
-    x = torch.randn(2, 48, 256)
+    x = torch.randn(2, 64, 256)
     out = model(x)
-    assert out.shape == (2, 48, 512)
+    assert out.shape == (2, 64, 512)
 
 
 def test_bilstm_square():
-    """(2,96,256) -> (2,96,512)."""
+    """(2,128,256) -> (2,128,512)."""
     model = PlateBiLSTM(input_size=256, hidden_size=256)
-    x = torch.randn(2, 96, 256)
+    x = torch.randn(2, 128, 256)
     out = model(x)
-    assert out.shape == (2, 96, 512)
+    assert out.shape == (2, 128, 512)
 
 
 # T3.5: UnifiedCTCHead
@@ -249,11 +247,11 @@ def test_unified_ctc_head_forward(plate_config: PlateConfig):
         input_size=512,
         union_alphabet_size=plate_config.union_alphabet_size,
     )
-    x = torch.randn(2, 48, 512)
+    x = torch.randn(2, 64, 512)
     country_idx = torch.tensor([0, 1])
     mask = mask_table[country_idx]
     out = head(x, mask)
-    assert out.shape == (2, 48, plate_config.union_alphabet_size)
+    assert out.shape == (2, 64, plate_config.union_alphabet_size)
 
 
 # T3.6: PlateOCRModel
@@ -262,9 +260,9 @@ def test_unified_ctc_head_forward(plate_config: PlateConfig):
 def test_model_forward(plate_config: PlateConfig):
     """Full forward pass -> ModelOutput with correct shapes."""
     model = PlateOCRModel(plate_config)
-    images = torch.randn(2, 3, 80, 192)
+    images = torch.randn(2, 3, 80, 256)
     orig_h = torch.tensor([80, 80])
-    orig_w = torch.tensor([192, 192])
+    orig_w = torch.tensor([256, 256])
     gt_countries = ["RU", "KZ"]
     gt_plate_types = ["standard", "standard"]
     result = model(
@@ -283,15 +281,15 @@ def test_model_forward(plate_config: PlateConfig):
     assert result.ctc_output.dim() == 3
     assert result.ctc_output.shape[0] == 2
     assert result.ctc_output.shape[2] == plate_config.union_alphabet_size
-    assert result.content_mask.shape == (2, 1, 20, 48)
+    assert result.content_mask.shape == (2, 1, 20, 64)
 
 
 def test_model_scheduled_sampling(plate_config: PlateConfig):
     """With prob=0.0 uses GT (no sampling)."""
     model = PlateOCRModel(plate_config)
-    images = torch.randn(2, 3, 80, 192)
+    images = torch.randn(2, 3, 80, 256)
     orig_h = torch.tensor([80, 80])
-    orig_w = torch.tensor([192, 192])
+    orig_w = torch.tensor([256, 256])
     gt_countries = ["RU", "KZ"]
     gt_plate_types = ["standard", "standard"]
     result = model(
@@ -317,9 +315,9 @@ def test_model_scheduled_sampling_mixed_types_no_assert(
     correctly.
     """
     model = PlateOCRModel(plate_config)
-    images = torch.randn(2, 3, 80, 192)
+    images = torch.randn(2, 3, 80, 256)
     orig_h = torch.tensor([80, 80])
-    orig_w = torch.tensor([192, 192])
+    orig_w = torch.tensor([256, 256])
     gt_countries = ["RU", "RU"]
     gt_plate_types = ["square", "square"]
     # prob=1.0 forces prediction, which defaults to 'standard'
@@ -415,19 +413,27 @@ def test_mask_disable_warmup_forward_no_mask(plate_config: PlateConfig):
     model = PlateOCRModel(plate_config, classification_cfg=cfg)
     model.train()
 
-    images = torch.randn(1, 3, 80, 192)
+    images = torch.randn(1, 3, 80, 256)
     orig_h = torch.tensor([80])
-    orig_w = torch.tensor([192])
+    orig_w = torch.tensor([256])
     gt_countries = ["RU"]
     gt_plate_types = ["standard"]
 
     out_no_mask = model(
-        images, orig_h, orig_w,
-        gt_countries=gt_countries, gt_plate_types=gt_plate_types, epoch=0,
+        images,
+        orig_h,
+        orig_w,
+        gt_countries=gt_countries,
+        gt_plate_types=gt_plate_types,
+        epoch=0,
     )
     out_flat = model(
-        images, orig_h, orig_w,
-        gt_countries=gt_countries, gt_plate_types=gt_plate_types, epoch=3,
+        images,
+        orig_h,
+        orig_w,
+        gt_countries=gt_countries,
+        gt_plate_types=gt_plate_types,
+        epoch=3,
     )
     # Same shape (same plate type), different values (no-mask vs flat-mask)
     assert out_no_mask.ctc_output.shape == out_flat.ctc_output.shape

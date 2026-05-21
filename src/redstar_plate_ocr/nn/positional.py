@@ -44,7 +44,7 @@ class SinusoidalPositionalEncoding(nn.Module):
         Args:
             d_model: Feature dimension (must match LSTM input_size).
             max_len: Maximum sequence length to pre-compute.
-                For standard plates ≈ 48, for square ≈ 96.
+                For standard plates ≈ 64, for square ≈ 128.
                 256 is a generous upper bound.
             dropout: Optional dropout after adding PE.
         """

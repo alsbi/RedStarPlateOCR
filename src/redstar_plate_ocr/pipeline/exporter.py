@@ -43,11 +43,14 @@ class ONNXWrapper(torch.nn.Module):
             backbone_out.final,
         )
         content_mask = self.model.compression.compute_content_mask(
-            orig_h, orig_w,
+            orig_h,
+            orig_w,
         )
         format_logits = self.model.format_head(
-            features, content_mask=content_mask,
-            orig_h=orig_h, orig_w=orig_w,
+            features,
+            content_mask=content_mask,
+            orig_h=orig_h,
+            orig_w=orig_w,
         )
         country_logits = self.model.country_head(features, content_mask)
 
@@ -116,14 +119,12 @@ class Exporter:
         if plate_config is None:
             plate_config = model.plate_config
 
-        dummy_images = torch.randn(
-            1, 3, 80, 192, device=export_device
-        )
+        dummy_images = torch.randn(1, 3, 80, 256, device=export_device)
         dummy_orig_h = torch.tensor(
             [80], dtype=torch.int64, device=export_device
         )
         dummy_orig_w = torch.tensor(
-            [192], dtype=torch.int64, device=export_device
+            [256], dtype=torch.int64, device=export_device
         )
 
         dynamic_axes = None
@@ -226,9 +227,9 @@ class Exporter:
             logger.warning("onnxruntime not installed, skipping verification")
             return
 
-        images = torch.randn(1, 3, 80, 192)
+        images = torch.randn(1, 3, 80, 256)
         orig_h = torch.tensor([80], dtype=torch.int64)
-        orig_w = torch.tensor([192], dtype=torch.int64)
+        orig_w = torch.tensor([256], dtype=torch.int64)
 
         with torch.no_grad():
             pt_out = wrapper(images, orig_h, orig_w)

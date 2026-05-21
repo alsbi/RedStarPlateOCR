@@ -180,15 +180,15 @@ class SmartEnhancer:
         new_h = round(h * scale)
         logger.debug(
             "SmartEnhancer: upscaling %dx%d → %dx%d (scale %.2f)",
-            w, h, new_w, new_h, scale,
+            w,
+            h,
+            new_w,
+            new_h,
+            scale,
         )
-        return cv2.resize(
-            image, (new_w, new_h), interpolation=cv2.INTER_CUBIC
-        )
+        return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
 
-    def _apply_clahe(
-        self, image: NDArray[np.uint8]
-    ) -> NDArray[np.uint8]:
+    def _apply_clahe(self, image: NDArray[np.uint8]) -> NDArray[np.uint8]:
         lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
         l_channel, a, b = cv2.split(lab)
         l_channel = self._clahe.apply(l_channel)
@@ -197,12 +197,8 @@ class SmartEnhancer:
         )
         return enhanced
 
-    def _apply_unsharp(
-        self, image: NDArray[np.uint8]
-    ) -> NDArray[np.uint8]:
-        blurred = cv2.GaussianBlur(
-            image, (0, 0), self.sharpen_sigma
-        )
+    def _apply_unsharp(self, image: NDArray[np.uint8]) -> NDArray[np.uint8]:
+        blurred = cv2.GaussianBlur(image, (0, 0), self.sharpen_sigma)
         sharpened = cv2.addWeighted(
             image,
             self.sharpen_alpha,

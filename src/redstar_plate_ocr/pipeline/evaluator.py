@@ -13,8 +13,12 @@ from torch.utils.data import DataLoader
 
 from redstar_plate_ocr.nn.metrics import (
     Accuracy,
+    AdjacentTranspositionRate,
+    BigramSwapRate,
     CharacterAccuracy,
     CharacterErrorRate,
+    NormalizedEditDistance,
+    compute_per_group_metrics,
 )
 from redstar_plate_ocr.nn.model import PlateOCRModel
 from redstar_plate_ocr.pipeline.utils import (
@@ -56,9 +60,7 @@ class Evaluator:
         preds: list[str] = []
         for i in range(bsz):
             inp_len = (
-                int(input_lengths[i])
-                if input_lengths is not None
-                else None
+                int(input_lengths[i]) if input_lengths is not None else None
             )
             if self.beam_width > 1:
                 pred, _ = self._beam_decoder.decode(ctc[i])
@@ -134,7 +136,9 @@ class Evaluator:
         if e2e:
             return model(images, orig_h, orig_w)
         return model(
-            images, orig_h, orig_w,
+            images,
+            orig_h,
+            orig_w,
             gt_countries=gt_regions,
             gt_plate_types=gt_plate_types,
             scheduled_sampling_prob=0.0,
@@ -172,6 +176,12 @@ class Evaluator:
         gt_countries_total: list[str] = []
         country_conf_total: list[float] = []
 
+        # Accumulate all predictions/targets for extended metrics
+        all_preds: list[str] = []
+        all_targets: list[str] = []
+        all_regions: list[str] = []
+        all_plate_types: list[str] = []
+
         model.eval()
         with torch.no_grad():
             for batch in dataloader:
@@ -182,8 +192,15 @@ class Evaluator:
                 gt_plate_types = batch["plate_type"]
                 gt_texts = batch["plate_text"]
 
-                output = self._forward(model, images, orig_h, orig_w,
-                                       gt_regions, gt_plate_types, e2e)
+                output = self._forward(
+                    model,
+                    images,
+                    orig_h,
+                    orig_w,
+                    gt_regions,
+                    gt_plate_types,
+                    e2e,
+                )
                 ctc = output.ctc_output
 
                 # Compute input_lengths to clip padded timesteps
@@ -197,9 +214,18 @@ class Evaluator:
                 char_acc.update(preds, gt_texts)
                 plate_acc.update(preds, gt_texts)
 
+                # Accumulate for extended metrics
+                all_preds.extend(preds)
+                all_targets.extend(gt_texts)
+                all_regions.extend(gt_regions)
+                all_plate_types.extend(gt_plate_types)
+
                 self._update_country_data(
-                    output, gt_regions, country_acc,
-                    pred_countries_total, gt_countries_total,
+                    output,
+                    gt_regions,
+                    country_acc,
+                    pred_countries_total,
+                    gt_countries_total,
                     country_conf_total,
                 )
 
@@ -207,11 +233,17 @@ class Evaluator:
                 format_acc.update(pred_formats, gt_plate_types)
 
                 self._update_type_metrics(
-                    preds, gt_texts, gt_plate_types,
-                    square_acc, standard_acc,
+                    preds,
+                    gt_texts,
+                    gt_plate_types,
+                    square_acc,
+                    standard_acc,
                 )
                 self._update_region_accs(
-                    preds, gt_texts, gt_regions, region_accs,
+                    preds,
+                    gt_texts,
+                    gt_regions,
+                    region_accs,
                 )
 
                 if interrupt_check is not None and interrupt_check():
@@ -230,6 +262,42 @@ class Evaluator:
         # Add per-region plate accuracy
         for region, acc in sorted(region_accs.items()):
             result[f"val_region_{region}"] = acc.compute()
+
+        # Extended metrics: NED, BSR, ATR
+        if all_preds:
+            ned_calc = NormalizedEditDistance()
+            bsr_calc = BigramSwapRate()
+            atr_calc = AdjacentTranspositionRate()
+
+            result["val_ned"] = ned_calc(all_preds, all_targets)
+            result["val_bigram_swap_rate"] = bsr_calc(
+                all_preds,
+                all_targets,
+            )
+            result["val_adjacent_transposition_rate"] = atr_calc(
+                all_preds,
+                all_targets,
+            )
+
+            # Per-country CER and plate accuracy
+            per_country = compute_per_group_metrics(
+                all_preds,
+                all_targets,
+                all_regions,
+            )
+            for country, metrics in per_country.items():
+                result[f"val_cer_{country}"] = metrics["cer"]
+                result[f"val_plateacc_{country}"] = metrics["plate_acc"]
+
+            # Per-format CER and plate accuracy
+            per_format = compute_per_group_metrics(
+                all_preds,
+                all_targets,
+                all_plate_types,
+            )
+            for fmt, metrics in per_format.items():
+                result[f"val_cer_fmt_{fmt}"] = metrics["cer"]
+                result[f"val_plateacc_fmt_{fmt}"] = metrics["plate_acc"]
 
         self._log_country_diagnostics(
             country_acc,
@@ -251,7 +319,8 @@ class Evaluator:
         total = len(pred_countries)
         if total == 0:
             return
-        correct = int(country_acc.compute() * total)
+        accuracy = country_acc.compute()
+        correct = int(accuracy * total)
         pred_dist = Counter(pred_countries)
         gt_dist = Counter(gt_countries)
         avg_conf = sum(country_conf) / len(country_conf)
@@ -260,7 +329,7 @@ class Evaluator:
             "avg_conf=%.3f, pred_dist=%s, gt_dist=%s",
             correct,
             total,
-            country_acc.compute() * 100,
+            accuracy * 100,
             avg_conf,
             dict(pred_dist.most_common()),
             dict(gt_dist.most_common()),
@@ -290,12 +359,9 @@ class Evaluator:
     ) -> list[str]:
         """Decode format logits to plate type strings."""
         indices = format_logits.argmax(dim=1)
-        result: list[str] = []
-        for idx in indices:
-            result.append(
-                "square" if int(idx.item()) == 1 else "standard",
-            )
-        return result
+        return [
+            "square" if int(idx.item()) == 1 else "standard" for idx in indices
+        ]
 
     @staticmethod
     def _filter_by_type(

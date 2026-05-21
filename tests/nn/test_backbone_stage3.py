@@ -21,10 +21,10 @@ def test_backbone_stage3_output_shape():
         se_reduction=4,
         drop_path_rate=0.05,
     )
-    x = torch.randn(2, 3, 80, 192)
+    x = torch.randn(2, 3, 80, 256)
     out = model(x)
     # Stage3 keeps H/4, W/4 and stage2_channels
-    assert out.final.shape == (2, 64, 20, 48)
+    assert out.final.shape == (2, 64, 20, 64)
 
 
 def test_backbone_no_stage3_backward_compat():
@@ -39,9 +39,9 @@ def test_backbone_no_stage3_backward_compat():
         se_reduction=4,
         drop_path_rate=0.05,
     )
-    x = torch.randn(2, 3, 80, 192)
+    x = torch.randn(2, 3, 80, 256)
     out = model(x)
-    assert out.final.shape == (2, 64, 20, 48)
+    assert out.final.shape == (2, 64, 20, 64)
     # Verify stage3 is empty/absent
     assert len(list(model.stage3.children())) == 0
 
@@ -107,9 +107,9 @@ def test_backbone_stage3_same_channels_no_downsample():
         stage3_blocks=3,
         se_reduction=4,
     )
-    x = torch.randn(1, 3, 80, 192)
+    x = torch.randn(1, 3, 80, 256)
     out = model(x)
     # Same channels as stage2, same spatial resolution
     assert out.final.shape[1] == 64
     assert out.final.shape[2] == 20
-    assert out.final.shape[3] == 48
+    assert out.final.shape[3] == 64

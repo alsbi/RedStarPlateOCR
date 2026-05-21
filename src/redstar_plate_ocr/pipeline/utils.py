@@ -182,13 +182,25 @@ def format_epoch_stats(
     sq = val_metrics.get("val_square_accuracy", 0.0)
 
     plate_tag, cer_tag = _build_tags(
-        plate, best_plate, cer, best_cer, is_first,
+        plate,
+        best_plate,
+        cer,
+        best_cer,
+        is_first,
     )
     cache_tag = " (cached)" if is_cached else ""
 
     core = _format_section_1(
-        plate, cer, char, country, fmt, std, sq,
-        plate_tag, cer_tag, cache_tag,
+        plate,
+        cer,
+        char,
+        country,
+        fmt,
+        std,
+        sq,
+        plate_tag,
+        cer_tag,
+        cache_tag,
     )
     per_country = _format_per_country(val_metrics)
     sys_str = _format_sys(train_loss, epoch_duration)
@@ -332,8 +344,13 @@ def log_epoch_summary(
         else ""
     )
     log_line = _build_main_log_line(
-        epoch, total_epochs, phase, lr,
-        train_loss, val_metrics, time_str,
+        epoch,
+        total_epochs,
+        phase,
+        lr,
+        train_loss,
+        val_metrics,
+        time_str,
     )
     log.info(log_line)
     _log_train_acc(log, val_metrics)

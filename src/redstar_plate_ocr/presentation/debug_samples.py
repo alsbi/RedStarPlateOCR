@@ -35,11 +35,13 @@ def _save_hook_factory(
     stage: str,
 ) -> Callable:
     """Build a preprocessing hook that captures stage output."""
+
     def hook(data):
         if isinstance(data, torch.Tensor):
             captured[stage] = data.cpu().numpy()
         else:
             captured[stage] = data.copy()
+
     return hook
 
 
@@ -59,12 +61,15 @@ def _save_mask_vis(
     mask = compute_content_mask(
         torch.tensor([orig_h]),
         torch.tensor([orig_w]),
-        feat_h, feat_w, stride,
+        feat_h,
+        feat_w,
+        stride,
     )
     mask_vis = mask[0, 0].cpu().numpy()
     mask_vis = (mask_vis * 255).astype(np.uint8)
     mask_vis = cv2.resize(
-        mask_vis, (canvas_w, canvas_h),
+        mask_vis,
+        (canvas_w, canvas_h),
         interpolation=cv2.INTER_NEAREST,
     )
     cv2.imwrite(str(out_dir / f"{prefix}_content_mask.png"), mask_vis)
@@ -126,11 +131,24 @@ def _process_single_sample(
 
     for stage, data in captured.items():
         _save_stage_vis(
-            stage, data, tensor, mean, std, out_dir, prefix,
+            stage,
+            data,
+            tensor,
+            mean,
+            std,
+            out_dir,
+            prefix,
         )
     _save_mask_vis(
-        orig_h, orig_w, feat_h, feat_w, stride,
-        canvas_h, canvas_w, out_dir, prefix,
+        orig_h,
+        orig_w,
+        feat_h,
+        feat_w,
+        stride,
+        canvas_h,
+        canvas_w,
+        out_dir,
+        prefix,
         captured.get("letterboxed"),
     )
     return True
@@ -152,7 +170,7 @@ def debug_samples(
 
     preproc = cfg.get("preprocessing", {})
     canvas_h = preproc.get("canvas_height", 80)
-    canvas_w = preproc.get("canvas_width", 192)
+    canvas_w = preproc.get("canvas_width", 256)
     pad_color = preproc.get("pad_color", 128)
     norm = preproc.get("normalization", {})
     mean = norm.get("mean", [0.485, 0.456, 0.406])
@@ -194,18 +212,10 @@ def debug_samples(
             augmentation=aug,
             enhancement_config=enhancement_cfg,
             hooks={
-                "on_augmented": _save_hook_factory(
-                    captured, "augmented"
-                ),
-                "on_scaled": _save_hook_factory(
-                    captured, "scaled"
-                ),
-                "on_letterboxed": _save_hook_factory(
-                    captured, "letterboxed"
-                ),
-                "on_normalized": _save_hook_factory(
-                    captured, "tensor"
-                ),
+                "on_augmented": _save_hook_factory(captured, "augmented"),
+                "on_scaled": _save_hook_factory(captured, "scaled"),
+                "on_letterboxed": _save_hook_factory(captured, "letterboxed"),
+                "on_normalized": _save_hook_factory(captured, "tensor"),
             },
         )
 
@@ -215,9 +225,18 @@ def debug_samples(
         prefix = f"{idx:03d}"
 
         success = _process_single_sample(
-            sample, pipeline, data_dir, out_dir,
-            prefix, canvas_h, canvas_w, feat_h, feat_w,
-            stride, mean, std,
+            sample,
+            pipeline,
+            data_dir,
+            out_dir,
+            prefix,
+            canvas_h,
+            canvas_w,
+            feat_h,
+            feat_w,
+            stride,
+            mean,
+            std,
         )
         if success:
             count[key] = idx + 1

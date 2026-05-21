@@ -56,12 +56,14 @@ class PlateDataset(torch.utils.data.Dataset):
         with open(csv_path, newline="") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                raw.append({
-                    "image_path": row["image_path"],
-                    "plate_text": row["plate_text"],
-                    "region": row["region"],
-                    "plate_type": row["plate_type"],
-                })
+                raw.append(
+                    {
+                        "image_path": row["image_path"],
+                        "plate_text": row["plate_text"],
+                        "region": row["region"],
+                        "plate_type": row["plate_type"],
+                    }
+                )
         return self._any_filter(raw, self._allowed_regions)
 
     def __len__(self) -> int:

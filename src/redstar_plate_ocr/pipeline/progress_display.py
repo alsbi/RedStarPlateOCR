@@ -31,10 +31,12 @@ class ProgressDisplay:
             TextColumn("│ {task.fields[stats]}"),
             refresh_per_second=refresh_per_second,
         )
+        self._warmup_text = Text("")
         self._validation_text = Text("")
         self._group = Group(
             self._epoch_text,
             self._batch_progress,
+            self._warmup_text,
             self._validation_text,
         )
         self._live = Live(
@@ -92,6 +94,19 @@ class ProgressDisplay:
     def remove_batch_task(self, task_id: TaskID) -> None:
         """Remove batch task."""
         self._batch_progress.remove_task(task_id)
+
+    # ── Warmup status line ──────────────────────────
+
+    def update_warmup_status(self, text: str) -> None:
+        """Update warmup status line (between batch bar and
+        validation marker).  Only shown when ``enable_warmup``
+        is True — call with empty string to clear.
+        """
+        self._warmup_text.plain = text
+
+    def hide_warmup_status(self) -> None:
+        """Remove warmup status line."""
+        self._warmup_text.plain = ""
 
     # ── Validation marker ────────────────────────────
 

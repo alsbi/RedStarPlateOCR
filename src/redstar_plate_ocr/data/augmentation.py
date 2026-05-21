@@ -13,15 +13,25 @@ import numpy as np
 def build_single_augmentation(
     config: dict,
     is_train: bool = True,
+    severity: float = 1.0,
 ) -> A.Compose | None:
     """Ровно одна случайная аугментация из конфига.
 
     Выбирает одну из включённых трансформаций (p=1.0 внутри
     OneOf), что гарантирует применение ровно одной за вызов.
+
+    Parameters
+    ----------
+    severity : float, optional
+        Сила аугментации от 0.0 до 1.0. Масштабирует вероятность
+        применения OneOf: при 1.0 — стандартная сила, при 0.0 —
+        аугментация не применяется (возвращается ``None``).
     """
     if not config:
         return None
     if not is_train:
+        return None
+    if severity <= 0.0:
         return None
     transforms = _build_transforms(config)
     if not transforms:
@@ -30,7 +40,7 @@ def build_single_augmentation(
     # а OneOf выбирает ровно одну.
     for t in transforms:
         t.p = 1.0
-    composed = A.OneOf(transforms, p=1.0)
+    composed = A.OneOf(transforms, p=severity)
     return A.Compose([composed])
 
 
@@ -38,6 +48,7 @@ def build_multi_augmentation(
     config: dict,
     is_train: bool = True,
     min_aug: int = 2,
+    severity: float = 1.0,
 ) -> A.Compose | None:
     """Рандомное количество (2+) аугментаций из конфига.
 
@@ -45,10 +56,19 @@ def build_multi_augmentation(
     из доступных трансформаций (от min_aug до всех).
     Каждая выбранная трансформация применяется с p=1.0.
     Количество n рандомизируется при создании пайплайна.
+
+    Parameters
+    ----------
+    severity : float, optional
+        Сила аугментации от 0.0 до 1.0. Масштабирует вероятность
+        применения SomeOf: при 1.0 — стандартная сила, при 0.0 —
+        аугментация не применяется (возвращается ``None``).
     """
     if not config:
         return None
     if not is_train:
+        return None
+    if severity <= 0.0:
         return None
     transforms = _build_transforms(config)
     if not transforms:
@@ -64,7 +84,7 @@ def build_multi_augmentation(
     composed = A.SomeOf(
         transforms,
         n=n,
-        p=1.0,
+        p=severity,
         replace=False,
     )
     return A.Compose([composed])
@@ -106,8 +126,12 @@ def _build_transforms(
         if not _is_enabled_config(cfg):
             continue
         _append_transform(
-            key, cfg, pixel_builders, geometric_builders,
-            pixel_transforms, geometric_transforms,
+            key,
+            cfg,
+            pixel_builders,
+            geometric_builders,
+            pixel_transforms,
+            geometric_transforms,
         )
     return pixel_transforms + geometric_transforms
 
@@ -124,9 +148,7 @@ def _append_transform(
     key: str,
     cfg: dict,
     pixel_builders: dict[str, Callable[[dict], A.BasicTransform | None]],
-    geometric_builders: dict[
-        str, Callable[[dict], A.BasicTransform | None]
-    ],
+    geometric_builders: dict[str, Callable[[dict], A.BasicTransform | None]],
     pixel_transforms: list[A.BasicTransform],
     geometric_transforms: list[A.BasicTransform],
 ) -> None:
@@ -336,7 +358,7 @@ def _infrared_glow_transform(
     tinted = inv.astype(np.float32)
     if random.random() < 0.5:
         # Greenish IR tint (common with IR LEDs)
-        tinted[:, :, 1] *= 1.0 + tint_strength   # green ↑
+        tinted[:, :, 1] *= 1.0 + tint_strength  # green ↑
         tinted[:, :, 0] *= 1.0 - tint_strength * 0.5  # red ↓
         tinted[:, :, 2] *= 1.0 - tint_strength * 0.3  # blue ↓
     else:

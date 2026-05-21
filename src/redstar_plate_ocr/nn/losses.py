@@ -29,9 +29,11 @@ def _resolve_map(
     alphabet: str,
     char_to_idx: dict[str, int] | None = None,
 ) -> dict[str, int]:
-    return char_to_idx if char_to_idx is not None else {
-        c: i for i, c in enumerate(alphabet)
-    }
+    return (
+        char_to_idx
+        if char_to_idx is not None
+        else {c: i for i, c in enumerate(alphabet)}
+    )
 
 
 def _extract_indices(
@@ -67,6 +69,38 @@ def text_to_indices(
     return indices
 
 
+def _collect_alpha_letters(plate_config: PlateConfig) -> set[str]:
+    """Collect true alphabetic letters from all regions.
+
+    valid_chars.letters may contain '-' or other separators
+    that are *not* real letters; pairing them with letters
+    should NOT trigger the order penalty.
+    """
+    letters: set[str] = set()
+    for rc in plate_config.regions.values():
+        for c in rc.valid_chars.letters:
+            if c.isalpha():
+                letters.add(c)
+    return letters
+
+
+def _build_same_type_pairs(
+    union_alphabet: str,
+    letters_set: set[str],
+) -> dict[tuple[str, str], bool]:
+    """Pre-compute same-type lookup for order penalty."""
+    digits_set = set("0123456789")
+    pairs: dict[tuple[str, str], bool] = {}
+    for c1 in union_alphabet:
+        for c2 in union_alphabet:
+            if c1 == c2:
+                continue
+            both_digits = c1 in digits_set and c2 in digits_set
+            both_letters = c1 in letters_set and c2 in letters_set
+            pairs[(c1, c2)] = both_digits or both_letters
+    return pairs
+
+
 class CombinedLoss(nn.Module):
     """Combined loss: α·L_fmt + β·L_ctry + γ·L_ctc + ε·L_order − δ·synergy."""
 
@@ -98,30 +132,13 @@ class CombinedLoss(nn.Module):
         self.country_loss = nn.CrossEntropyLoss(
             label_smoothing=country_label_smoothing
         )
-        # Pre-computed dict for O(1) char→index lookup
         self._char_to_idx: dict[str, int] = {
             c: i for i, c in enumerate(plate_config.union_alphabet)
         }
-        # Pre-compute same-type lookup for order penalty
-        union = plate_config.union_alphabet
-        digits_set = set("0123456789")
-        # Build a true letters set — only alphabetic characters.
-        # valid_chars.letters may contain '-' or other separators
-        # that are *not* real letters; pairing them with letters
-        # should NOT trigger the order penalty.
-        letters_set: set[str] = set()
-        for rc in plate_config.regions.values():
-            for c in rc.valid_chars.letters:
-                if c.isalpha():
-                    letters_set.add(c)
-        self._same_type_pairs: dict[tuple[str, str], bool] = {}
-        for i, c1 in enumerate(union):
-            for c2 in union:
-                if c1 == c2:
-                    continue
-                both_digits = c1 in digits_set and c2 in digits_set
-                both_letters = c1 in letters_set and c2 in letters_set
-                self._same_type_pairs[(c1, c2)] = both_digits or both_letters
+        letters_set = _collect_alpha_letters(plate_config)
+        self._same_type_pairs = _build_same_type_pairs(
+            plate_config.union_alphabet, letters_set
+        )
 
     def forward(
         self,
@@ -411,9 +428,7 @@ class CombinedLoss(nn.Module):
                 T, dtype=torch.float32, device=ctc_output.device
             )
 
-            sample_penalty = torch.tensor(
-                0.0, device=ctc_output.device
-            )
+            sample_penalty = torch.tensor(0.0, device=ctc_output.device)
             count = 0
 
             for k in range(len(text) - 1):
@@ -461,7 +476,7 @@ class CombinedLoss(nn.Module):
         gt_texts: list[str],
         input_lengths: Tensor,
     ) -> Tensor | None:
-        """Differentialble length consistency loss.
+        """Differentiable length consistency loss.
 
         Censures enough non-blank emission probability along the
         sequence to cover every character in the ground-truth text.
@@ -488,16 +503,16 @@ class CombinedLoss(nn.Module):
 
         for b in range(B):
             T = int(input_lengths[b].item())
-            sample_logits = ctc_output[b, :T]           # (T, V)
+            sample_logits = ctc_output[b, :T]  # (T, V)
             target_len = len(gt_texts[b])
             if target_len == 0:
                 continue
 
             # Soft non-blank emission count:
             # For each timestep, probability mass on non-blank chars.
-            probs = F.softmax(sample_logits, dim=-1)     # (T, V)
+            probs = F.softmax(sample_logits, dim=-1)  # (T, V)
             non_blank_probs = probs[:, :blank_idx].sum(dim=-1)  # (T,)
-            expected_count = non_blank_probs.sum()      # scalar
+            expected_count = non_blank_probs.sum()  # scalar
 
             # Under-emission penalty: if expected non-blank < target
             diff = target_len - expected_count

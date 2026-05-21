@@ -19,14 +19,64 @@ from redstar_plate_ocr.pipeline.utils import (
 from redstar_plate_ocr.plate.config import PlateConfig
 
 if TYPE_CHECKING:
+    from redstar_plate_ocr.pipeline.tracking import MetricsTracker
     from redstar_plate_ocr.pipeline.trainer import Trainer
 
 logger = logging.getLogger(__name__)
 
+# Loss component keys tracked from CombinedLoss.forward()
+_LOSS_COMPONENTS = (
+    "ctc",
+    "country",
+    "format",
+    "order",
+    "char_aux",
+    "synergy",
+    "length",
+)
+
+
+def _compute_char_aux_ramp_weight(
+    base_weight: float,
+    peak_weight: float | None,
+    ramp_epochs: int,
+    current_epoch: int,
+    total_epochs: int,
+) -> float:
+    """Compute char_aux_weight with optional ramp schedule.
+
+    If *peak_weight* is None or *ramp_epochs* is 0, returns
+    *base_weight* unchanged (no ramp).
+
+    Ramp schedule:
+        epoch 0..ramp_epochs-1   → linear rise base→peak
+        epoch ramp_epochs..end    → linear decay peak→base
+
+    This gives the auxiliary head a strong gradient signal early
+    in training (when backbone features are still random) and then
+    tapers off so the main CTC path dominates.
+    """
+    if peak_weight is None or ramp_epochs <= 0:
+        return base_weight
+    if current_epoch < ramp_epochs:
+        factor = current_epoch / ramp_epochs
+        return base_weight + (peak_weight - base_weight) * factor
+    decay_epochs = total_epochs - ramp_epochs
+    if decay_epochs > 0:
+        factor = min(1.0, (current_epoch - ramp_epochs) / decay_epochs)
+        return peak_weight - (peak_weight - base_weight) * factor
+    return peak_weight
+
 
 _BatchTensors = tuple[
-    torch.Tensor, torch.Tensor, torch.Tensor, list[str],
-    list[str], list[str], torch.Tensor, torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    list[str],
+    list[str],
+    list[str],
+    torch.Tensor,
+    torch.Tensor,
 ]
 
 
@@ -41,18 +91,20 @@ def _setup_batch(
     gt_regions = batch["region"]
     gt_plate_types = batch["plate_type"]
     gt_texts = batch["plate_text"]
-    format_labels = [
-        1 if pt == "square" else 0 for pt in gt_plate_types
-    ]
+    format_labels = [1 if pt == "square" else 0 for pt in gt_plate_types]
     gt_format = torch.tensor(
         format_labels, dtype=torch.long, device=trainer.device
     )
-    gt_country = trainer.model.encode_countries(gt_regions).to(
-        trainer.device
-    )
+    gt_country = trainer.model.encode_countries(gt_regions).to(trainer.device)
     return (
-        images, orig_h, orig_w, gt_regions, gt_plate_types,
-        gt_texts, gt_format, gt_country,
+        images,
+        orig_h,
+        orig_w,
+        gt_regions,
+        gt_plate_types,
+        gt_texts,
+        gt_format,
+        gt_country,
     )
 
 
@@ -89,28 +141,31 @@ def _backward_step(
 def _optimizer_step(
     trainer: Trainer,
     step: int,
-) -> tuple[int, bool]:
+) -> tuple[int, bool, float]:
     """Gradient accumulation and optimizer step.
 
-    Returns updated step counter and whether step was performed.
+    Returns updated step counter, whether step was performed,
+    and combined gradient norm (0.0 if no step).
     """
     config = trainer.config
     if step % config.gradient_accumulation_steps != 0:
-        return step + 1, False
+        return step + 1, False, 0.0
 
     grad_clip = config.gradient_clip
     if trainer.use_amp:
         trainer.scaler.unscale_(trainer.optimizer)
         trainer.scaler.unscale_(trainer.country_optimizer)
 
-    torch.nn.utils.clip_grad_norm_(
+    main_gn = torch.nn.utils.clip_grad_norm_(
         trainer.optimizer.param_groups[0]["params"],
         max_norm=grad_clip,
     )
-    torch.nn.utils.clip_grad_norm_(
+    ctry_gn = torch.nn.utils.clip_grad_norm_(
         trainer.country_optimizer.param_groups[0]["params"],
         max_norm=grad_clip,
     )
+    # Combined norm across both param groups
+    total_gn = (main_gn.item() ** 2 + ctry_gn.item() ** 2) ** 0.5
 
     if trainer.use_amp:
         trainer.scaler.step(trainer.optimizer)
@@ -122,7 +177,7 @@ def _optimizer_step(
 
     trainer.optimizer.zero_grad()
     trainer.country_optimizer.zero_grad()
-    return step + 1, True
+    return step + 1, True, total_gn
 
 
 def _compute_batch_accuracy(
@@ -151,7 +206,8 @@ def _compute_batch_accuracy(
     for i in range(bsz):
         inp_len = int(input_lengths[i]) if input_lengths is not None else None
         pred = greedy_decode(
-            output.ctc_output[i], union_alphabet,
+            output.ctc_output[i],
+            union_alphabet,
             input_length=inp_len,
         )
         tgt = gt_texts[i]
@@ -217,7 +273,10 @@ def _update_progress(
     """Compute batch accuracy and update progress display."""
     with torch.no_grad():
         result = _compute_batch_accuracy(
-            output, gt_format, gt_country, gt_texts,
+            output,
+            gt_format,
+            gt_country,
+            gt_texts,
             trainer.model.plate_config,
             input_lengths=input_lengths,
         )
@@ -227,7 +286,11 @@ def _update_progress(
     running_plate_acc.append(plate_acc)
     running_char_acc.append(char_acc)
     stats = _format_batch_stats(
-        running, fmt_acc, ctry_acc, plate_acc, char_acc,
+        running,
+        fmt_acc,
+        ctry_acc,
+        plate_acc,
+        char_acc,
         avg_batch_ms=avg_batch_ms,
     )
     best = getattr(trainer, "_best_metrics", None)
@@ -247,13 +310,38 @@ def _update_running_loss(
     running: dict[str, float],
     loss_dict: dict[str, torch.Tensor],
 ) -> None:
-    """Update running loss dictionary from loss dict."""
+    """Update running loss dictionary from loss dict.
+
+    Stores latest value for display and accumulates sums
+    for epoch-level averaging via ``_compute_final_loss_avgs``.
+    """
+    running["_loss_count"] = running.get("_loss_count", 0) + 1
+    # Latest total loss for progress bar display
     running["loss"] = loss_dict["total"].item()
-    running["ctc"] = loss_dict["ctc"].item()
-    running["country"] = loss_dict["country"].item()
-    running["format"] = loss_dict["format"].item()
-    if "order" in loss_dict:
-        running["order"] = loss_dict["order"].item()
+    # Per-component: latest value + running sum for averaging
+    for key in _LOSS_COMPONENTS:
+        if key in loss_dict:
+            val = loss_dict[key].item()
+            running[key] = val
+            running[f"_sum_{key}"] = running.get(f"_sum_{key}", 0.0) + val
+
+
+def _compute_final_loss_avgs(running: dict[str, float]) -> None:
+    """Replace per-component losses with epoch averages."""
+    count = running.get("_loss_count", 0)
+    if count <= 0:
+        return
+    for key in _LOSS_COMPONENTS:
+        sum_key = f"_sum_{key}"
+        if sum_key in running:
+            running[key] = running[sum_key] / count
+    # Also average the total loss
+    if "_sum_loss" not in running and "loss" in running:
+        pass  # total loss kept as-is (latest value)
+    # Cleanup internal keys
+    for k in list(running):
+        if k.startswith("_sum_") or k == "_loss_count":
+            del running[k]
 
 
 def _compute_final_accuracies(
@@ -273,6 +361,102 @@ def _compute_final_accuracies(
     running["char_acc"] = sum(running_char_acc) / n
 
 
+def _build_step_metrics(
+    running: dict[str, float],
+    cur_lr: float,
+) -> dict[str, float]:
+    """Build step-level metrics dict for tracker logging."""
+    metrics: dict[str, float] = {
+        "train/step_loss": running["loss"],
+        "train/step_lr": cur_lr,
+    }
+    for key in _LOSS_COMPONENTS:
+        if key in running:
+            metrics[f"train/step_{key}_loss"] = running[key]
+    return metrics
+
+
+def _log_tracker_step(
+    tracker: MetricsTracker,
+    global_step: int,
+    log_interval: int,
+    log_grad_interval: int,
+    running: dict[str, float],
+    cur_lr: float,
+    grad_norm: float,
+) -> None:
+    """Log step-level metrics and grad norm to tracker."""
+    if global_step % log_interval == 0:
+        step_metrics = _build_step_metrics(running, cur_lr)
+        tracker.log(step_metrics, step=global_step)
+    if (
+        log_grad_interval > 0
+        and global_step % log_grad_interval == 0
+        and grad_norm > 0.0
+    ):
+        tracker.log(
+            {"train/grad_norm": grad_norm},
+            step=global_step,
+        )
+
+
+def _compute_avg_batch_ms(
+    epoch_start: float,
+    batch_idx: int,
+) -> float:
+    """Compute average batch time in ms; 0.0 if not started."""
+    if epoch_start <= 0.0:
+        return 0.0
+    elapsed = (time.monotonic() - epoch_start) * 1000
+    return elapsed / (batch_idx + 1)
+
+
+def _forward_and_backward(
+    trainer: Trainer,
+    images: torch.Tensor,
+    orig_h: torch.Tensor,
+    orig_w: torch.Tensor,
+    gt_regions: list[str],
+    gt_plate_types: list[str],
+    gt_texts: list[str],
+    gt_format: torch.Tensor,
+    gt_country: torch.Tensor,
+    sampling_prob: float,
+    current_epoch: int,
+) -> tuple[object, dict[str, torch.Tensor], torch.Tensor]:
+    """Forward + loss + backward; return output, loss_dict, input_lengths."""
+    with torch.amp.autocast(trainer.device.type, enabled=trainer.use_amp):
+        output = trainer.model(
+            images,
+            orig_h,
+            orig_w,
+            gt_countries=gt_regions,
+            gt_plate_types=gt_plate_types,
+            scheduled_sampling_prob=sampling_prob,
+            epoch=current_epoch,
+        )
+
+        seq_len = output.ctc_output.shape[1]
+        per_sample_types = list(gt_plate_types)
+        input_lengths = trainer.model.compression.compute_input_lengths(
+            output.content_mask, per_sample_types
+        ).to(trainer.device)
+        input_lengths = input_lengths.clamp(min=2, max=seq_len)
+
+        loss_dict, total_loss = _compute_loss_with_lengths(
+            trainer,
+            output,
+            gt_format,
+            gt_country,
+            gt_texts,
+            input_lengths,
+        )
+        loss = total_loss / trainer.config.gradient_accumulation_steps
+        _backward_step(trainer, loss)
+
+    return output, loss_dict, input_lengths
+
+
 def run_train_epoch(
     trainer: Trainer,
     loader,
@@ -281,12 +465,16 @@ def run_train_epoch(
     task_id: TaskID,
     epoch_start: float = 0.0,
     current_epoch: int = 0,
+    tracker: MetricsTracker | None = None,
+    log_interval: int = 20,
+    log_grad_interval: int = 100,
 ) -> dict[str, float]:
     """Run one training epoch with Rich progress bar."""
     trainer.model.train()
     trainer.optimizer.zero_grad()
     trainer.country_optimizer.zero_grad()
     step = 0
+    global_step = 0
     running: dict[str, float] = {}
     batches_since_update = 0
     running_fmt_acc: list[float] = []
@@ -295,53 +483,71 @@ def run_train_epoch(
     running_char_acc: list[float] = []
     avg_batch_ms: float = 0.0
 
+    # Apply char_aux ramp schedule if configured
+    cfg = trainer.config
+    ramp_weight = _compute_char_aux_ramp_weight(
+        base_weight=cfg.char_aux_weight,
+        peak_weight=cfg.char_aux_peak_weight,
+        ramp_epochs=cfg.char_aux_ramp_epochs,
+        current_epoch=current_epoch,
+        total_epochs=cfg.epochs,
+    )
+    trainer.combined_loss.char_aux_weight = ramp_weight
+
     for batch_idx, batch in enumerate(loader):
         (
-            images, orig_h, orig_w, gt_regions, gt_plate_types,
-            gt_texts, gt_format, gt_country,
+            images,
+            orig_h,
+            orig_w,
+            gt_regions,
+            gt_plate_types,
+            gt_texts,
+            gt_format,
+            gt_country,
         ) = _setup_batch(trainer, batch)
 
-        with torch.amp.autocast(
-            trainer.device.type, enabled=trainer.use_amp
-        ):
-            output = trainer.model(
-                images, orig_h, orig_w,
-                gt_countries=gt_regions,
-                gt_plate_types=gt_plate_types,
-                scheduled_sampling_prob=sampling_prob,
-                epoch=current_epoch,
-            )
+        output, loss_dict, input_lengths = _forward_and_backward(
+            trainer,
+            images,
+            orig_h,
+            orig_w,
+            gt_regions,
+            gt_plate_types,
+            gt_texts,
+            gt_format,
+            gt_country,
+            sampling_prob,
+            current_epoch,
+        )
 
-            # Compute input_lengths once for both loss and metrics
-            seq_len = output.ctc_output.shape[1]
-            per_sample_types = list(gt_plate_types)
-            input_lengths = trainer.model.compression.compute_input_lengths(
-                output.content_mask, per_sample_types
-            ).to(trainer.device)
-            input_lengths = input_lengths.clamp(min=2, max=seq_len)
+        avg_batch_ms = _compute_avg_batch_ms(epoch_start, batch_idx)
 
-            loss_dict, total_loss = _compute_loss_with_lengths(
-                trainer, output, gt_format, gt_country, gt_texts,
-                input_lengths,
-            )
-            loss = total_loss / trainer.config.gradient_accumulation_steps
-
-            if epoch_start > 0.0:
-                elapsed = (time.monotonic() - epoch_start) * 1000
-                avg_batch_ms = elapsed / (batch_idx + 1)
-
-            _backward_step(trainer, loss)
-
-        step, _ = _optimizer_step(trainer, step)
+        step, did_step, grad_norm = _optimizer_step(trainer, step)
 
         cur_lr = trainer.optimizer.param_groups[0]["lr"]
         _update_running_loss(running, loss_dict)
 
         logger.debug(
             "Batch %d/%d loss=%.4f ctc=%.4f lr=%.4f",
-            batch_idx + 1, len(loader), running["loss"], running["ctc"],
+            batch_idx + 1,
+            len(loader),
+            running["loss"],
+            running.get("ctc", 0.0),
             cur_lr,
         )
+
+        # Real-time step-level logging to tracker (P1)
+        if did_step and tracker is not None:
+            global_step += 1
+            _log_tracker_step(
+                tracker,
+                global_step,
+                log_interval,
+                log_grad_interval,
+                running,
+                cur_lr,
+                grad_norm,
+            )
 
         batches_since_update += 1
         if _should_update_progress(
@@ -351,11 +557,20 @@ def run_train_epoch(
             trainer.config.update_every_n_batches,
         ):
             _update_progress(
-                trainer, output, gt_format, gt_country, gt_texts,
-                running, avg_batch_ms, progress_display, task_id,
+                trainer,
+                output,
+                gt_format,
+                gt_country,
+                gt_texts,
+                running,
+                avg_batch_ms,
+                progress_display,
+                task_id,
                 batches_since_update,
-                running_fmt_acc, running_ctry_acc,
-                running_plate_acc, running_char_acc,
+                running_fmt_acc,
+                running_ctry_acc,
+                running_plate_acc,
+                running_char_acc,
                 input_lengths=input_lengths,
             )
             batches_since_update = 0
@@ -371,4 +586,5 @@ def run_train_epoch(
         running_plate_acc,
         running_char_acc,
     )
+    _compute_final_loss_avgs(running)
     return running

@@ -59,7 +59,7 @@ def test_training_one_epoch(
         },
         "preprocessing": {
             "canvas_height": 80,
-            "canvas_width": 192,
+            "canvas_width": 256,
             "pad_color": 128,
             "normalization": {
                 "mean": [0.485, 0.456, 0.406],

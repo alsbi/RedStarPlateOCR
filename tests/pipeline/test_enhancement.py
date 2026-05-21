@@ -43,9 +43,7 @@ def enhancer() -> SmartEnhancer:
 @pytest.fixture
 def micro_crop() -> np.ndarray:
     """A 20×100 RGB crop that should trigger the micro-crop rule."""
-    return np.random.randint(
-        0, 255, size=(20, 100, 3), dtype=np.uint8
-    )
+    return np.random.randint(0, 255, size=(20, 100, 3), dtype=np.uint8)
 
 
 @pytest.fixture
@@ -80,9 +78,7 @@ class TestQualityAssessor:
         self, assessor: QualityAssessor
     ) -> None:
         # Gaussian blur kills Laplacian variance
-        sharp = np.random.randint(
-            0, 255, size=(60, 160, 3), dtype=np.uint8
-        )
+        sharp = np.random.randint(0, 255, size=(60, 160, 3), dtype=np.uint8)
         import cv2
 
         blurry = cv2.GaussianBlur(sharp, (15, 15), 5.0)
@@ -111,26 +107,18 @@ class TestQualityAssessor:
 
 class TestSmartEnhancer:
     def test_upscales_micro_crop(self, enhancer: SmartEnhancer) -> None:
-        crop = np.random.randint(
-            0, 255, size=(20, 60, 3), dtype=np.uint8
-        )
+        crop = np.random.randint(0, 255, size=(20, 60, 3), dtype=np.uint8)
         enhanced = enhancer.enhance(crop)
         assert enhanced.shape[0] >= 40  # upscaled to 40+ px
         assert enhanced.shape[1] >= 120
         assert enhanced.dtype == np.uint8
 
-    def test_no_upscale_for_large_crop(
-        self, enhancer: SmartEnhancer
-    ) -> None:
-        crop = np.random.randint(
-            0, 255, size=(80, 200, 3), dtype=np.uint8
-        )
+    def test_no_upscale_for_large_crop(self, enhancer: SmartEnhancer) -> None:
+        crop = np.random.randint(0, 255, size=(80, 200, 3), dtype=np.uint8)
         enhanced = enhancer.enhance(crop)
         assert enhanced.shape == (80, 200, 3)
 
-    def test_clahe_changes_l_channel(
-        self, enhancer: SmartEnhancer
-    ) -> None:
+    def test_clahe_changes_l_channel(self, enhancer: SmartEnhancer) -> None:
         # Create a low-contrast image
         crop = np.full((60, 160, 3), 128, dtype=np.uint8)
         crop[:30, :80] = 130  # very subtle difference
@@ -138,9 +126,7 @@ class TestSmartEnhancer:
         # Image should change (CLAHE should increase contrast)
         assert np.any(enhanced != crop)
 
-    def test_output_clamped_uint8(
-        self, enhancer: SmartEnhancer
-    ) -> None:
+    def test_output_clamped_uint8(self, enhancer: SmartEnhancer) -> None:
         crop = np.full((20, 50, 3), 255, dtype=np.uint8)
         enhanced = enhancer.enhance(crop)
         assert enhanced.max() <= 255
@@ -201,9 +187,9 @@ class TestPreprocessPipelineEnhancement:
         assert pipeline._enhancer is not None
         # Should not crash
         tensor, h, w = pipeline(micro_crop)
-        assert tensor.shape == (3, 80, 192)
+        assert tensor.shape == (3, 80, 256)
         assert 0 < h <= 80
-        assert 0 < w <= 192
+        assert 0 < w <= 256
 
     def test_pipeline_without_enhancement_still_works(
         self, large_sharp_crop: np.ndarray
@@ -211,7 +197,7 @@ class TestPreprocessPipelineEnhancement:
         """Backwards compatibility: pipeline without config works."""
         pipeline = PreprocessPipeline()
         tensor, h, w = pipeline(large_sharp_crop)
-        assert tensor.shape == (3, 80, 192)
+        assert tensor.shape == (3, 80, 256)
 
     def test_enhancement_does_not_change_canvas_size(
         self, micro_crop: np.ndarray
@@ -226,13 +212,11 @@ class TestPreprocessPipelineEnhancement:
         )
         tensor_off, _, _ = pipeline_off(micro_crop)
         tensor_on, _, _ = pipeline_on(micro_crop)
-        assert tensor_off.shape == tensor_on.shape == (3, 80, 192)
+        assert tensor_off.shape == tensor_on.shape == (3, 80, 256)
 
     def test_enhancement_preserves_dtype(self) -> None:
         """Output must stay float32 tensor in CHW layout."""
-        crop = np.random.randint(
-            0, 255, size=(20, 80, 3), dtype=np.uint8
-        )
+        crop = np.random.randint(0, 255, size=(20, 80, 3), dtype=np.uint8)
         pipeline = PreprocessPipeline(
             enhancement_config={
                 "enabled": True,
@@ -252,9 +236,7 @@ class TestPreprocessPipelineEnhancement:
 class TestEdgeCases:
     def test_single_pixel_row(self) -> None:
         """Extreme aspect ratio 1×100 should not crash."""
-        crop = np.random.randint(
-            0, 255, size=(1, 100, 3), dtype=np.uint8
-        )
+        crop = np.random.randint(0, 255, size=(1, 100, 3), dtype=np.uint8)
         pipeline = PreprocessPipeline(
             enhancement_config={
                 "enabled": True,
@@ -263,13 +245,11 @@ class TestEdgeCases:
             }
         )
         tensor, _, _ = pipeline(crop)
-        assert tensor.shape == (3, 80, 192)
+        assert tensor.shape == (3, 80, 256)
 
     def test_3x3_image(self) -> None:
         """Tiny square should not crash."""
-        crop = np.random.randint(
-            0, 255, size=(3, 3, 3), dtype=np.uint8
-        )
+        crop = np.random.randint(0, 255, size=(3, 3, 3), dtype=np.uint8)
         pipeline = PreprocessPipeline(
             enhancement_config={
                 "enabled": True,
@@ -277,7 +257,7 @@ class TestEdgeCases:
             }
         )
         tensor, _, _ = pipeline(crop)
-        assert tensor.shape == (3, 80, 192)
+        assert tensor.shape == (3, 80, 256)
 
     def test_already_at_target_size(self) -> None:
         """Exact 40px min side should not upscale, only CLAHE."""

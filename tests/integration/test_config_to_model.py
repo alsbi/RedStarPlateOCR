@@ -31,9 +31,9 @@ def test_model_forward_with_real_config(plate_config):
     model = PlateOCRModel(plate_config)
     model.eval()
 
-    images = torch.randn(2, 3, 80, 192)
+    images = torch.randn(2, 3, 80, 256)
     orig_h = torch.tensor([80, 60])
-    orig_w = torch.tensor([192, 120])
+    orig_w = torch.tensor([256, 120])
     gt_countries = ["RU", "KZ"]
     gt_plate_types = ["standard", "standard"]
 

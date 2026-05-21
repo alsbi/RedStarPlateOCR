@@ -3,7 +3,7 @@
 
 preprocessing:
   canvas_height: 80
-  canvas_width: 192
+  canvas_width: 256
   pad_color: 128
   normalization:
     mean: [0.485, 0.456, 0.406]
@@ -16,6 +16,7 @@ backbone:
   stage1_blocks: 2
   stage2_channels: 384
   stage2_blocks: 4
+  stage3_channels: 512
   stage3_blocks: 2
   se_reduction: 4
   activation: silu
@@ -26,7 +27,7 @@ fusion:
   enabled: true
 
 compression:
-  in_channels: 384
+  in_channels: 512
 
 classification:
   format_head:
@@ -35,21 +36,21 @@ classification:
     dropout: 0.2
   country_head:
     enabled: true
-    loss_weight: 1.5
+    loss_weight: 1.6
     branch: separate
-    branch_channels: 64
+    conv_channels: 64
     grid_rows: 2
     grid_cols: 4
-    branch_hidden: 256
+    hidden_size: 256
     dropout: 0.2
     confidence_threshold: 0.7
 
 lstm:
-  input_size: 384
-  hidden_size: 256
-  num_layers: 2
+  input_size: 512
+  hidden_size: 384
+  num_layers: 3
   bidirectional: true
-  dropout: 0.1
+  dropout: 0.25
   positional_dropout: 0.0
 
 ctc:
@@ -69,26 +70,41 @@ unified_ctc_head:
 
 char_aux:
   enabled: true
+  enable_film: true
+  country_emb_dim: 128
+  format_emb_dim: 64
+  hidden_dim: 1024
+
+film:
+  enable_film: true
+  country_emb_dim: 128
+  format_emb_dim: 64
+  hidden_dim: 1024
+
+temporal_bridge:
+  enable_temporal_bridge: true
 
 training:
   batch_size: 64
   epochs: 300
-  lr: 0.002
+  lr: 0.0015
   weight_decay: 0.02
   label_smoothing: 0.01
   gradient_clip: 1.1
   gradient_clip_type: norm
   use_amp: true
-  no_aug_epochs: 10
-  warmup_epochs: 3
-  single_aug_epochs: 3
-  num_multi_aug: 1
+  no_aug_epochs: 5
+  warmup_epochs: 8
+  single_aug_epochs: 10
+  num_multi_aug: 3
   gradient_accumulation_steps: 2
-  synergy_weight: 0.3
+  synergy_weight: 0.6
   country_grad_scale: 5.0
-  char_aux_weight: 0.45
-  order_weight: 0.3
-  length_weight: 0.5
+  char_aux_weight: 0.5
+  char_aux_peak_weight: 0.7
+  char_aux_ramp_epochs: 20
+  order_weight: 0.4
+  length_weight: 0.55
   order_margin: 1.0
   scheduled_sampling_max_prob: 0.5
   scheduled_sampling_ramp_epochs: 5
@@ -103,9 +119,14 @@ training:
     patience: 5
     factor: 0.5
     final_lr_factor: 0.01
-  use_trackio: false
-  trackio_project: "redstar-plate-ocr"
   num_workers: 2
+  log_interval: 20
+  log_grad_interval: 100
+
+tracking:
+  enabled: true
+  project: redstar-plate-ocr
+  # name: auto-generated from timestamp if not set
 
 export:
   onnx_opset: 17

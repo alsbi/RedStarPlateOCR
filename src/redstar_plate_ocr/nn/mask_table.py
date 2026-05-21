@@ -34,9 +34,7 @@ def _allowed_for_position(
         if pos >= len(pat):
             allowed |= region_letters | region_digits
         else:
-            allowed |= _char_allowed(
-                pat[pos], region_letters, region_digits
-            )
+            allowed |= _char_allowed(pat[pos], region_letters, region_digits)
     return allowed
 
 

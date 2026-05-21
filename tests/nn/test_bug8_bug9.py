@@ -23,9 +23,9 @@ class TestBug8CountryInference:
             final_layer.weight.fill_(0)
             final_layer.bias.fill_(0)
             final_layer.bias[3] = 10.0
-        images = torch.randn(1, 3, 80, 192)
+        images = torch.randn(1, 3, 80, 256)
         orig_h = torch.tensor([80])
-        orig_w = torch.tensor([192])
+        orig_w = torch.tensor([256])
         with torch.no_grad():
             result = model(
                 images,
@@ -50,9 +50,9 @@ class TestBug8CountryInference:
             final_layer.weight.fill_(0)
             final_layer.bias.fill_(0)
             final_layer.bias[5] = 10.0
-        images = torch.randn(1, 3, 80, 192)
+        images = torch.randn(1, 3, 80, 256)
         orig_h = torch.tensor([80])
-        orig_w = torch.tensor([192])
+        orig_w = torch.tensor([256])
         with torch.no_grad():
             result = model(
                 images,
@@ -75,9 +75,9 @@ class TestBug8CountryInference:
             final_layer.weight.fill_(0)
             final_layer.bias.fill_(0)
             # Low uniform bias -> model picks index 0 as argmax
-        images = torch.randn(1, 3, 80, 192)
+        images = torch.randn(1, 3, 80, 256)
         orig_h = torch.tensor([80])
-        orig_w = torch.tensor([192])
+        orig_w = torch.tensor([256])
         with torch.no_grad():
             result = model(
                 images,
@@ -101,9 +101,9 @@ class TestBug9LSTMNoContamination:
         model.eval()
 
         # Run mixed batch: 1 standard + 1 square
-        images = torch.randn(2, 3, 80, 192)
+        images = torch.randn(2, 3, 80, 256)
         orig_h = torch.tensor([80, 80])
-        orig_w = torch.tensor([192, 192])
+        orig_w = torch.tensor([256, 256])
         with torch.no_grad():
             result_mixed = model(
                 images,
@@ -128,8 +128,8 @@ class TestBug9LSTMNoContamination:
 
         # Standard sample's LSTM output should be identical
         # whether it's in a mixed batch or alone
-        mixed_std_lstm = result_mixed.ctc_output[:1, :48, :]
-        alone_std_lstm = result_std.ctc_output[:1, :48, :]
+        mixed_std_lstm = result_mixed.ctc_output[:1, :64, :]
+        alone_std_lstm = result_std.ctc_output[:1, :64, :]
         torch.testing.assert_close(
             mixed_std_lstm,
             alone_std_lstm,
@@ -146,9 +146,9 @@ class TestBug9LSTMNoContamination:
         model.eval()
 
         # Run mixed batch
-        images = torch.randn(2, 3, 80, 192)
+        images = torch.randn(2, 3, 80, 256)
         orig_h = torch.tensor([80, 80])
-        orig_w = torch.tensor([192, 192])
+        orig_w = torch.tensor([256, 256])
         with torch.no_grad():
             result_mixed = model(
                 images,

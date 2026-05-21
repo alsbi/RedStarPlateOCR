@@ -39,9 +39,9 @@ class TestPlateDataset:
         assert "orig_w" in sample
 
     def test_image_shape(self, dataset: PlateDataset) -> None:
-        """Тензор изображения формы (3, 80, 192)."""
+        """Тензор изображения формы (3, 80, 256)."""
         sample = dataset[0]
-        assert sample["image"].shape == (3, 80, 192)
+        assert sample["image"].shape == (3, 80, 256)
 
     def test_plate_text_is_string(self, dataset: PlateDataset) -> None:
         """plate_text — строка."""
@@ -58,6 +58,6 @@ class TestPlateDataset:
         """Загрузка 3 сэмплов из val.csv → корректные данные."""
         for i in range(min(3, len(dataset))):
             sample = dataset[i]
-            assert sample["image"].shape == (3, 80, 192)
+            assert sample["image"].shape == (3, 80, 256)
             assert isinstance(sample["plate_text"], str)
             assert len(sample["plate_text"]) > 0

@@ -16,18 +16,18 @@ class TestAttentionPool:
     def test_output_shape_standard(self) -> None:
         """(B,C,H,W) + mask -> (B,C,W)."""
         pool = AttentionPool(in_channels=256)
-        features = torch.randn(2, 256, 20, 48)
-        mask = torch.ones(2, 1, 20, 48)
+        features = torch.randn(2, 256, 20, 64)
+        mask = torch.ones(2, 1, 20, 64)
         out = pool(features, mask)
-        assert out.shape == (2, 256, 48)
+        assert out.shape == (2, 256, 64)
 
     def test_output_shape_square_halves(self) -> None:
         """Top/bot halves: (B,C,H/2,W) -> (B,C,W)."""
         pool = AttentionPool(in_channels=256)
-        features = torch.randn(2, 256, 10, 48)
-        mask = torch.ones(2, 1, 10, 48)
+        features = torch.randn(2, 256, 10, 64)
+        mask = torch.ones(2, 1, 10, 64)
         out = pool(features, mask)
-        assert out.shape == (2, 256, 48)
+        assert out.shape == (2, 256, 64)
 
     def test_masking_zeros_out_padded_rows(self) -> None:
         """Padded rows (mask=0) contribute near-zero."""
@@ -83,27 +83,27 @@ class TestAdaptiveCompressionAttention:
         """forward_standard with attention produces (B,W,C)."""
         comp = AdaptiveCompression(
             canvas_height=80,
-            canvas_width=192,
+            canvas_width=256,
             in_channels=256,
         )
-        features = torch.randn(2, 256, 20, 48)
+        features = torch.randn(2, 256, 20, 64)
         orig_h = torch.tensor([80, 80])
-        orig_w = torch.tensor([192, 192])
+        orig_w = torch.tensor([256, 256])
         out = comp.forward_standard(features, orig_h, orig_w)
-        assert out.shape == (2, 48, 256)
+        assert out.shape == (2, 64, 256)
 
     def test_forward_square_shape(self) -> None:
         """forward_square with attention produces (B,2*W,C)."""
         comp = AdaptiveCompression(
             canvas_height=80,
-            canvas_width=192,
+            canvas_width=256,
             in_channels=256,
         )
-        features = torch.randn(2, 256, 20, 48)
+        features = torch.randn(2, 256, 20, 64)
         orig_h = torch.tensor([80, 80])
-        orig_w = torch.tensor([192, 192])
+        orig_w = torch.tensor([256, 256])
         out = comp.forward_square(features, orig_h, orig_w)
-        assert out.shape == (2, 96, 256)
+        assert out.shape == (2, 128, 256)
 
     def test_no_masked_mean_method(self) -> None:
         """_masked_mean static method removed."""
@@ -114,18 +114,18 @@ class TestAdaptiveCompressionAttention:
         """Gradient flows through attention-based compression."""
         comp = AdaptiveCompression(
             canvas_height=80,
-            canvas_width=192,
+            canvas_width=256,
             in_channels=256,
         )
         features = torch.randn(
             1,
             256,
             20,
-            48,
+            64,
             requires_grad=True,
         )
         orig_h = torch.tensor([80])
-        orig_w = torch.tensor([192])
+        orig_w = torch.tensor([256])
         out = comp.forward_standard(features, orig_h, orig_w)
         out.sum().backward()
         assert features.grad is not None

@@ -16,22 +16,22 @@ class TestPreprocessPipeline:
     """Тесты пайплайна предобработки."""
 
     def test_standard_shape(self) -> None:
-        """Изображение 400×100 → тензор (3,80,192)."""
+        """Изображение 400×100 → тензор (3,80,256)."""
         pipe = PreprocessPipeline()
         img = _make_image(100, 400)
         tensor, scaled_h, scaled_w = pipe(img)
-        assert tensor.shape == (3, 80, 192)
-        # scale = min(192/400, 80/100) = 0.48 → (48, 192)
-        assert scaled_h == 48
-        assert scaled_w == 192
+        assert tensor.shape == (3, 80, 256)
+        # scale = min(256/400, 80/100) = 0.64 → (64, 256)
+        assert scaled_h == 64
+        assert scaled_w == 256
 
     def test_square_shape(self) -> None:
-        """Квадратное изображение 100×100 → тензор (3,80,192)."""
+        """Квадратное изображение 100×100 → тензор (3,80,256)."""
         pipe = PreprocessPipeline()
         img = _make_image(100, 100)
         tensor, scaled_h, scaled_w = pipe(img)
-        assert tensor.shape == (3, 80, 192)
-        # scale = min(192/100, 80/100) = 0.8 → (80, 80)
+        assert tensor.shape == (3, 80, 256)
+        # scale = min(256/100, 80/100) = 0.8 → (80, 80)
         assert scaled_h == 80
         assert scaled_w == 80
 
@@ -40,9 +40,9 @@ class TestPreprocessPipeline:
         pipe = PreprocessPipeline()
         img = _make_image(50, 200)
         _, scaled_h, scaled_w = pipe(img)
-        # scale = min(192/200, 80/50) = 0.96 → (48, 192)
-        assert scaled_h == 48
-        assert scaled_w == 192
+        # scale = min(256/200, 80/50) = 1.28 → (64, 256)
+        assert scaled_h == 64
+        assert scaled_w == 256
 
     def test_letterbox_left_top(self) -> None:
         """Изображение выровнено по левому верхнему углу."""
@@ -71,7 +71,7 @@ class TestPreprocessPipeline:
         pipe = PreprocessPipeline(mean=mean, std=std)
         img = _make_image(80, 200)
         tensor, _, _ = pipe(img)
-        assert tensor.shape == (3, 80, 192)
+        assert tensor.shape == (3, 80, 256)
 
     def test_with_augmentation(self) -> None:
         """Пайплайн работает с аугментацией (augment → scale)."""
@@ -81,10 +81,10 @@ class TestPreprocessPipeline:
         pipe = PreprocessPipeline(augmentation=aug)
         img = _make_image(100, 400)
         tensor, scaled_h, scaled_w = pipe(img)
-        assert tensor.shape == (3, 80, 192)
+        assert tensor.shape == (3, 80, 256)
         # Rotate на полном размере, затем scale — размеры те же
-        assert scaled_h == 48
-        assert scaled_w == 192
+        assert scaled_h == 64
+        assert scaled_w == 256
 
     def test_augment_before_scale(self) -> None:
         """Аугментация применяется до масштабирования."""
@@ -95,24 +95,24 @@ class TestPreprocessPipeline:
         pipe = PreprocessPipeline(augmentation=aug)
         img = _make_image(100, 400)
         tensor, scaled_h, scaled_w = pipe(img)
-        assert tensor.shape == (3, 80, 192)
+        assert tensor.shape == (3, 80, 256)
         # После flip+scale размеры те же, что и без аугментации
-        assert scaled_h == 48
-        assert scaled_w == 192
+        assert scaled_h == 64
+        assert scaled_w == 256
 
     def test_no_augmentation_same_as_before(self) -> None:
         """Без аугментации порядок augment→scale≡scale."""
         pipe = PreprocessPipeline()
         img = _make_image(100, 400)
         tensor, scaled_h, scaled_w = pipe(img)
-        assert tensor.shape == (3, 80, 192)
-        assert scaled_h == 48
-        assert scaled_w == 192
+        assert tensor.shape == (3, 80, 256)
+        assert scaled_h == 64
+        assert scaled_w == 256
 
     def test_scale_ringing_replaced_with_pad_color(self) -> None:
         """LANCZOS4 ringing у границ серого → точный pad_color."""
         # Изображение: серый 128, но с контрастной полосой
-        img = np.full((80, 192, 3), 128, dtype=np.uint8)
+        img = np.full((80, 256, 3), 128, dtype=np.uint8)
         # Белая полоса в центре — на границе будет ringing
         img[30:50, 60:130, :] = 255
         pipe = PreprocessPipeline(pad_color=128)
@@ -128,7 +128,7 @@ class TestPreprocessPipeline:
 
     def test_scale_preserves_content_pixels(self) -> None:
         """Масштабирование сохраняет контент-пиксели (не серые)."""
-        img = np.full((80, 192, 3), 128, dtype=np.uint8)
+        img = np.full((80, 256, 3), 128, dtype=np.uint8)
         img[30:50, 60:130, :] = 255
         pipe = PreprocessPipeline(pad_color=128)
         scaled = pipe._scale(img)
@@ -212,9 +212,9 @@ class TestPreprocessWithAutoUnpad:
         rng = np.random.RandomState(10)
         img = rng.randint(0, 255, (30, 117, 3), dtype=np.uint8)
         tensor, h, w = pipe(img)
-        assert tensor.shape == (3, 80, 192)
-        assert h == 49
-        assert w == 192
+        assert tensor.shape == (3, 80, 256)
+        assert h == 66
+        assert w == 256
 
     def test_pre_canvased_image_stripped(self) -> None:
         """Pre-canvased image stripped with correct content_mask dims."""
@@ -227,12 +227,12 @@ class TestPreprocessWithAutoUnpad:
             0, 255, (56, 256, 3), dtype=np.uint8
         )
         tensor, h, w = pipe(canvas)
-        assert tensor.shape == (3, 80, 192)
-        # After unpad: 56x256, scale=min(192/256,80/56)
-        # = min(0.75, 1.428) = 0.75
-        # So 56*0.75=42, 256*0.75=192
-        assert h == 42
-        assert w == 192
+        assert tensor.shape == (3, 80, 256)
+        # After unpad: 56x256, scale=min(256/256,80/56)
+        # = min(1.0, 1.428) = 1.0
+        # So 56*1.0=56, 256*1.0=256
+        assert h == 56
+        assert w == 256
 
     def test_pre_canvased_same_as_raw(self) -> None:
         """Pre-canvased and raw images of the same plate produce same dims."""

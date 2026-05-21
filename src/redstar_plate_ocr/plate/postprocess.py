@@ -26,7 +26,10 @@ def _decode_gpu(
 ) -> tuple[str, float]:
     """CTC decode on GPU tensor."""
     pad = torch.full(
-        (1,), -1, device=indices.device, dtype=indices.dtype,
+        (1,),
+        -1,
+        device=indices.device,
+        dtype=indices.dtype,
     )
     shifted = torch.cat([pad, indices[:-1]])
     keep = (indices != blank_idx) & (indices != shifted)
@@ -234,9 +237,7 @@ class BeamSearchDecoder:
             new_beam: dict[str, tuple[float, float]] = {}
             step_lp = log_probs[t].tolist()
             for prefix, (p_b, p_nb) in beam.items():
-                self._expand_prefix(
-                    prefix, p_b, p_nb, step_lp, V, new_beam
-                )
+                self._expand_prefix(prefix, p_b, p_nb, step_lp, V, new_beam)
             beam = _prune_beams(new_beam, self.beam_width)
         return self._finalize_beam(beam)
 
@@ -259,7 +260,13 @@ class BeamSearchDecoder:
             if not self._is_allowed(c, len(prefix)):
                 continue
             self._expand_character(
-                prefix, c, lp, p_total, p_b, p_nb, new_beam,
+                prefix,
+                c,
+                lp,
+                p_total,
+                p_b,
+                p_nb,
+                new_beam,
             )
 
     def _is_blank(self, c: int) -> bool:
@@ -327,7 +334,10 @@ class BeamSearchDecoder:
     ) -> None:
         """Handle new character case."""
         _update_beam(
-            new_beam, prefix + ch, float("-inf"), p_total + lp,
+            new_beam,
+            prefix + ch,
+            float("-inf"),
+            p_total + lp,
         )
 
     @staticmethod

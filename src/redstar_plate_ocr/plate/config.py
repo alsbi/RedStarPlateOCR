@@ -105,9 +105,7 @@ class PlateConfig(BaseModel):
     def country_list(self) -> list[str]:
         """List of enabled countries sorted by ISO code (alphabetical)."""
         return sorted(
-            code
-            for code, region in self.regions.items()
-            if region.enabled
+            code for code, region in self.regions.items() if region.enabled
         )
 
     @functools.cached_property

@@ -96,9 +96,7 @@ def _print_startup_panel(
         "[bold]Val[/bold]",
     )
 
-    for country, fmt in _all_country_format_keys(
-        train_counts, val_counts
-    ):
+    for country, fmt in _all_country_format_keys(train_counts, val_counts):
         tr = train_counts.get(country, {}).get(fmt, 0)
         va = val_counts.get(country, {}).get(fmt, 0)
         table.add_row(country, fmt, str(tr), str(va))
@@ -118,9 +116,7 @@ def _format_metric_value(container: dict, key: str) -> str:
 
 def _region_metric_keys(best: dict, last: dict) -> list[str]:
     return [
-        k
-        for k in sorted(set(best) | set(last))
-        if k.startswith("val_region_")
+        k for k in sorted(set(best) | set(last)) if k.startswith("val_region_")
     ]
 
 

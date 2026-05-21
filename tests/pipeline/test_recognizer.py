@@ -25,12 +25,12 @@ def _make_mock_model(
     # Simulate format=standard (0), country=RU (0)
     format_logits = torch.tensor([[10.0, 0.0]])
     country_logits = torch.tensor([[10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]])
-    # CTC output: (1, 48, union_alphabet_size)
+    # CTC output: (1, 64, union_alphabet_size)
     union_size = plate_config.union_alphabet_size
-    ctc_output = torch.zeros(1, 48, union_size)
+    ctc_output = torch.zeros(1, 64, union_size)
     # Make blank dominant everywhere
     ctc_output[:, :, -1] = 5.0
-    content_mask = torch.ones(1, 1, 20, 48)
+    content_mask = torch.ones(1, 1, 20, 64)
 
     mock.return_value = ModelOutput(
         format_logits=format_logits,
@@ -68,7 +68,7 @@ class TestPyTorchRecognizer:
         pc = plate_config
         model = _make_mock_model(pc)
         recognizer = PyTorchRecognizer(model=model, plate_config=pc)
-        image = np.zeros((80, 192, 3), dtype=np.uint8)
+        image = np.zeros((80, 256, 3), dtype=np.uint8)
         result = recognizer.recognize(image)
         assert isinstance(result, RecognitionResult)
         assert isinstance(result.text, str)
@@ -91,12 +91,12 @@ class TestPyTorchRecognizer:
         model.return_value = ModelOutput(
             format_logits=torch.tensor([[10.0, 0.0]]),
             country_logits=torch.zeros(1, 8),
-            ctc_output=torch.zeros(1, 48, union_size),
-            content_mask=torch.ones(1, 1, 20, 48),
+            ctc_output=torch.zeros(1, 64, union_size),
+            content_mask=torch.ones(1, 1, 20, 64),
             plate_types=["standard"],
         )
         recognizer = PyTorchRecognizer(model=model, plate_config=pc)
-        image = np.zeros((80, 192, 3), dtype=np.uint8)
+        image = np.zeros((80, 256, 3), dtype=np.uint8)
         result = recognizer.recognize(image)
         # Low confidence → best real country + needs_review
         assert result.country in pc.country_list
@@ -117,12 +117,12 @@ class TestPyTorchRecognizer:
             country_logits=torch.tensor(
                 [[10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]
             ),
-            ctc_output=torch.zeros(1, 96, union_size),
-            content_mask=torch.ones(1, 1, 20, 48),
+            ctc_output=torch.zeros(1, 128, union_size),
+            content_mask=torch.ones(1, 1, 20, 64),
             plate_types=["square"],
         )
         recognizer = PyTorchRecognizer(model=model, plate_config=pc)
-        image = np.zeros((80, 192, 3), dtype=np.uint8)
+        image = np.zeros((80, 256, 3), dtype=np.uint8)
         result = recognizer.recognize(image)
         assert result.plate_type == "square"
 
@@ -143,12 +143,12 @@ class TestPyTorchRecognizer:
         model.return_value = ModelOutput(
             format_logits=torch.tensor([[0.0, 10.0]]),  # square
             country_logits=country_logits,
-            ctc_output=torch.zeros(1, 48, union_size),
-            content_mask=torch.ones(1, 1, 20, 48),
+            ctc_output=torch.zeros(1, 64, union_size),
+            content_mask=torch.ones(1, 1, 20, 64),
             plate_types=["standard"],
         )
         recognizer = PyTorchRecognizer(model=model, plate_config=pc)
-        image = np.zeros((80, 192, 3), dtype=np.uint8)
+        image = np.zeros((80, 256, 3), dtype=np.uint8)
         result = recognizer.recognize(image)
         assert result.country == "UZ"
         assert result.plate_type == "square"
@@ -168,11 +168,11 @@ class TestPyTorchRecognizer:
             country_logits=torch.tensor(
                 [[10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]
             ),
-            ctc_output=torch.zeros(1, 96, union_size),
-            content_mask=torch.ones(1, 1, 20, 48),
+            ctc_output=torch.zeros(1, 128, union_size),
+            content_mask=torch.ones(1, 1, 20, 64),
             plate_types=["square"],
         )
         recognizer = PyTorchRecognizer(model=model, plate_config=pc)
-        image = np.zeros((80, 192, 3), dtype=np.uint8)
+        image = np.zeros((80, 256, 3), dtype=np.uint8)
         result = recognizer.recognize(image)
         assert result.plate_type == "square"

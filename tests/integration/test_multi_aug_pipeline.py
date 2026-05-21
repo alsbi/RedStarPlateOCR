@@ -50,7 +50,7 @@ class TestConcatDatasetIntegration:
     def test_concat_2_datasets_batch_shape(
         self,
     ) -> None:
-        """ConcatDataset из 2 датасетов → батч формы (B, 3, 80, 192)."""
+        """ConcatDataset из 2 датасетов → батч формы (B, 3, 80, 256)."""
         base = _make_base_dataset(n_samples=4)
         aug = A.Compose([A.Rotate(limit=3, p=1.0)])
         aug_pipeline = PreprocessPipeline(augmentation=aug)
@@ -76,7 +76,7 @@ class TestConcatDatasetIntegration:
             batch = next(iter(loader))
 
         assert isinstance(batch["image"], torch.Tensor)
-        assert batch["image"].shape[1:] == (3, 80, 192)
+        assert batch["image"].shape[1:] == (3, 80, 256)
 
     def test_concat_3_datasets_batch_shape(
         self,
@@ -113,7 +113,7 @@ class TestConcatDatasetIntegration:
             batch = next(iter(loader))
 
         assert isinstance(batch["image"], torch.Tensor)
-        assert batch["image"].shape[1:] == (3, 80, 192)
+        assert batch["image"].shape[1:] == (3, 80, 256)
 
     def test_concat_metadata(self) -> None:
         """Метаданные корректны при ConcatDataset."""
@@ -232,7 +232,7 @@ class TestTrainerBuildTrainLoaderIntegration:
             batch = next(iter(loader))
 
         assert isinstance(batch["image"], torch.Tensor)
-        assert batch["image"].shape[1:] == (3, 80, 192)
+        assert batch["image"].shape[1:] == (3, 80, 256)
 
     def test_trainer_build_train_loader_no_aug(
         self,

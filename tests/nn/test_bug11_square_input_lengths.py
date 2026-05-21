@@ -21,38 +21,38 @@ class TestBug11SquareInputLengths:
         """Square input_length = feat_w + bot_present (both halves visible)."""
         comp = AdaptiveCompression(
             canvas_height=80,
-            canvas_width=192,
+            canvas_width=256,
             stride=4,
             in_channels=256,
         )
-        # feat_w = 192 // 4 = 48
+        # feat_w = 256 // 4 = 64
         # Square plate 80x80: top half uses 20 cols,
         # bottom half uses 20 cols
-        mask = torch.zeros(1, 1, 20, 48)
+        mask = torch.zeros(1, 1, 20, 64)
         mask[0, 0, :10, :20] = 1.0  # top half content
         mask[0, 0, 10:, :20] = 1.0  # bottom half content
         result = comp.compute_input_lengths(mask, ["square"])
-        # feat_w(48) + bot_present(20) + safety_margin(4) = 72
-        assert result[0].item() == 48 + 20 + 4
+        # feat_w(64) + bot_present(20) + safety_margin(4) = 88
+        assert result[0].item() == 64 + 20 + 4
 
     def test_square_input_lengths_specific_value(
         self,
     ):
-        """Canvas 80x192, stride=4, square 80x80: input_length=72."""
+        """Canvas 80x256, stride=4, square 80x80: input_length=88."""
         comp = AdaptiveCompression(
             canvas_height=80,
-            canvas_width=192,
+            canvas_width=256,
             stride=4,
             in_channels=256,
         )
-        # feat_w = 48, feat_h = 20
+        # feat_w = 64, feat_h = 20
         # Square plate 80x80: top=10 rows x 20 cols, bot=10 rows x 20 cols
-        mask = torch.zeros(1, 1, 20, 48)
+        mask = torch.zeros(1, 1, 20, 64)
         mask[0, 0, :10, :20] = 1.0
         mask[0, 0, 10:, :20] = 1.0
         result = comp.compute_input_lengths(mask, ["square"])
-        # feat_w(48) + bot_present(20) + safety_margin(4) = 72
-        assert result[0].item() == 72
+        # feat_w(64) + bot_present(20) + safety_margin(4) = 88
+        assert result[0].item() == 88
 
     def test_standard_input_lengths_unchanged(
         self,
@@ -60,11 +60,11 @@ class TestBug11SquareInputLengths:
         """Standard path input_lengths not affected by the fix."""
         comp = AdaptiveCompression(
             canvas_height=80,
-            canvas_width=192,
+            canvas_width=256,
             stride=4,
             in_channels=256,
         )
-        mask = torch.zeros(1, 1, 20, 48)
+        mask = torch.zeros(1, 1, 20, 64)
         mask[0, 0, :, :30] = 1.0
         result = comp.compute_input_lengths(mask, ["standard"])
         # col_present(30) + safety_margin(4) = 34

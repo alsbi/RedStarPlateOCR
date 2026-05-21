@@ -259,9 +259,9 @@ def test_evaluator_interrupt_check_breaks_loop(plate_config: PlateConfig):
                 raise StopIteration
             call_count += 1
             return {
-                "image": torch.randn(1, 3, 80, 192),
+                "image": torch.randn(1, 3, 80, 256),
                 "orig_h": torch.tensor([80]),
-                "orig_w": torch.tensor([192]),
+                "orig_w": torch.tensor([256]),
                 "region": ["RU"],
                 "plate_type": ["standard"],
                 "plate_text": ["A000AA00"],

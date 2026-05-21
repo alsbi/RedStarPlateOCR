@@ -18,15 +18,15 @@ def test_model_overfits_small_batch(plate_config):
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
     # Synthetic data
-    images = torch.randn(5, 3, 80, 192)
+    images = torch.randn(5, 3, 80, 256)
     orig_h = torch.tensor([80] * 5)
-    orig_w = torch.tensor([192] * 5)
+    orig_w = torch.tensor([256] * 5)
     gt_countries = ["RU"] * 5
     gt_plate_types = ["standard"] * 5
     gt_format = torch.tensor([0] * 5)  # standard
     gt_country = torch.tensor([0] * 5)  # RU
     gt_texts = ["A123BC99"] * 5
-    input_lengths = torch.tensor([48] * 5)
+    input_lengths = torch.tensor([64] * 5)
 
     model.train()
     losses: list[float] = []

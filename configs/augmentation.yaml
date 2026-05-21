@@ -6,7 +6,7 @@ brightness_contrast:
   enabled: true
   brightness_limit: 0.15
   contrast_limit: 0.15
-  p: 0.4
+  p: 0.5
 
 motion_blur:
   enabled: true
@@ -20,7 +20,7 @@ gauss_noise:
 jpeg_compression:
   enabled: true
   quality_range: [85, 100]
-  p: 0.2
+  p: 0.3
 
 coarse_dropout:
   enabled: true
@@ -37,17 +37,17 @@ infrared_glow:
   contrast_boost: 1.4
   # Gaussian sigma for bloom/glow halo (0 = disabled)
   glow_sigma: 3
-  p: 0.2
+  p: 0.3
 
 # Geometric transforms
 rotation:
   enabled: true
-  limit: 3
+  limit: 4
   p: 0.3
 
 perspective:
   enabled: true
-  scale: 0.05
+  scale: 0.06
   p: 0.25
 
 affine:
@@ -55,3 +55,14 @@ affine:
   shear_x: [-5, 5]
   translate_percent_x: [-0.05, 0.05]
   p: 0.25
+
+# Warmup adaptive augmentation schedule
+warmup:
+  enable_warmup: true            # Master switch - when false, training works as before
+  initial_severity: 1.0          # Starting severe_aug severity (0-1)
+  threshold_disable_severe: 0.15  # Word accuracy threshold to fully disable severe
+  severe_step: 0.01              # Step size for decreasing severe_severity
+  patience_severe: 10            # Epochs without improvement before forced severe decrease
+  severe_threshold_std_start: 0.3  # severe level where std starts growing
+  severe_midpoint: 0.15           # Intermediate point for std transition curve
+  early_stop_patience: 15        # Early stopping patience after severe is disabled

@@ -128,9 +128,7 @@ class _StratifiedBatchSampler(Sampler[list[int]]):
             random.shuffle(batches)
         return batches
 
-    def _filter_original_indices(
-        self, indices: list[int]
-    ) -> list[int]:
+    def _filter_original_indices(self, indices: list[int]) -> list[int]:
         """Исключает оригинальные сэмплы с вероятностью 1-original_prob.
 
         Работает только при is_train и original_prob < 1.0.
@@ -147,8 +145,7 @@ class _StratifiedBatchSampler(Sampler[list[int]]):
         return [
             i
             for i in indices
-            if i >= self.original_len
-            or random.random() < self.original_prob
+            if i >= self.original_len or random.random() < self.original_prob
         ]
 
     def __iter__(self):

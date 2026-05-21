@@ -321,7 +321,8 @@ class TestInfraredGlowTransform:
 
     @staticmethod
     def _make_plate_image(
-        h: int = 32, w: int = 128,
+        h: int = 32,
+        w: int = 128,
     ) -> np.ndarray:
         """Synthetic plate: white bg with dark rectangular 'char'."""
         img = np.full((h, w, 3), 230, dtype=np.uint8)  # light bg
@@ -374,10 +375,14 @@ class TestInfraredGlowTransform:
         """Higher contrast_boost produces brighter chars."""
         img = self._make_plate_image()
         out_low = _infrared_glow_transform(
-            img, contrast_boost=1.0, glow_sigma=0,
+            img,
+            contrast_boost=1.0,
+            glow_sigma=0,
         )
         out_high = _infrared_glow_transform(
-            img, contrast_boost=2.0, glow_sigma=0,
+            img,
+            contrast_boost=2.0,
+            glow_sigma=0,
         )
         char_low = out_low[8:24, 16:32].mean()
         char_high = out_high[8:24, 16:32].mean()
@@ -390,7 +395,9 @@ class TestInfraredGlowTransform:
         channels_diff: set[bool] = set()
         for _ in range(20):
             out = _infrared_glow_transform(
-                img, tint_strength=0.5, glow_sigma=0,
+                img,
+                tint_strength=0.5,
+                glow_sigma=0,
             )
             r, g, b = out[12, 24].astype(float)
             # At least one channel differs from others
@@ -405,7 +412,8 @@ class TestInfraredGlowTransform:
         img = self._make_plate_image()
         out_no_glow = _infrared_glow_transform(img, glow_sigma=0)
         out_with_glow = _infrared_glow_transform(
-            img, glow_sigma=5,
+            img,
+            glow_sigma=5,
         )
         # With glow, pixels near the character edge should be brighter
         # (bloom extends the bright region)

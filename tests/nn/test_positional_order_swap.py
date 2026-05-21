@@ -16,17 +16,20 @@ from __future__ import annotations
 
 import math
 
-import pytest
 import torch
 
 from redstar_plate_ocr.nn.losses import CombinedLoss
 from redstar_plate_ocr.nn.positional import SinusoidalPositionalEncoding
 from redstar_plate_ocr.nn.types import ModelOutput
+from redstar_plate_ocr.plate.config import (
+    PlateConfig,
+    RegionConfig,
+    ValidChars,
+)
 from redstar_plate_ocr.plate.confusion import adjacent_swap_correct
-from redstar_plate_ocr.plate.config import PlateConfig, RegionConfig, ValidChars
-
 
 # ── Helpers ───────────────────────────────────────────────────────
+
 
 def _make_plate_config() -> PlateConfig:
     """Minimal plate config with RU-like patterns."""
@@ -74,9 +77,9 @@ class TestSinusoidalPositionalEncoding:
         out = pe(x)
         # Each timestep should be different
         for i in range(19):
-            assert not torch.allclose(
-                out[0, i], out[0, i + 1], atol=1e-6
-            ), f"PE at t={i} and t={i+1} are identical"
+            assert not torch.allclose(out[0, i], out[0, i + 1], atol=1e-6), (
+                f"PE at t={i} and t={i + 1} are identical"
+            )
 
     def test_same_position_same_encoding(self):
         """Same position across batch gets the same PE."""
@@ -86,14 +89,14 @@ class TestSinusoidalPositionalEncoding:
         out = pe(x)
         # All batch items at position 3 should have the same encoding
         for b in range(1, 4):
-            assert torch.allclose(
-                out[0, 3], out[b, 3], atol=1e-6
-            )
+            assert torch.allclose(out[0, 3], out[b, 3], atol=1e-6)
 
     def test_sinusoidal_values(self):
         """Verify actual sin/cos values at known positions."""
         d = 8
-        pe_module = SinusoidalPositionalEncoding(d_model=d, max_len=10, dropout=0.0)
+        pe_module = SinusoidalPositionalEncoding(
+            d_model=d, max_len=10, dropout=0.0
+        )
         pe_table = pe_module._pe  # (10, 8)
 
         # Position 0: sin(0*freq) and cos(0*freq) for each pair
@@ -102,7 +105,8 @@ class TestSinusoidalPositionalEncoding:
             # Even index = sin
             assert abs(pe_table[0, 2 * j].item() - math.sin(0 * freq)) < 1e-5
             # Odd index = cos
-            assert abs(pe_table[0, 2 * j + 1].item() - math.cos(0 * freq)) < 1e-5
+            cos_val = pe_table[0, 2 * j + 1].item()
+            assert abs(cos_val - math.cos(0 * freq)) < 1e-5
 
     def test_gradient_flows_through(self):
         """PE is additive and doesn't block gradients."""
@@ -189,9 +193,7 @@ class TestOrderPenalty:
         logits[0, 10, b_idx] = 10.0  # B peaks at t=10
         input_lengths = torch.tensor([T])
 
-        result = loss_fn._compute_order_penalty(
-            logits, ["AB"], input_lengths
-        )
+        result = loss_fn._compute_order_penalty(logits, ["AB"], input_lengths)
         # soft_peak_A ≈ 5, soft_peak_B ≈ 10
         # diff = 5 - 10 = -5, penalty = max(-5 - 1, 0) = 0
         assert result.item() == 0.0
@@ -210,12 +212,10 @@ class TestOrderPenalty:
         T = 48
         logits = torch.full((1, T, cfg.union_alphabet_size), -5.0)
         logits[0, 10, a_idx] = 10.0  # A peaks at t=10
-        logits[0, 5, b_idx] = 10.0   # B peaks at t=5 (wrong order!)
+        logits[0, 5, b_idx] = 10.0  # B peaks at t=5 (wrong order!)
         input_lengths = torch.tensor([T])
 
-        result = loss_fn._compute_order_penalty(
-            logits, ["AB"], input_lengths
-        )
+        result = loss_fn._compute_order_penalty(logits, ["AB"], input_lengths)
         # soft_peak_A ≈ 10, soft_peak_B ≈ 5
         # diff = 10 - 5 = 5, penalty = max(5 - 1, 0) = 4.0
         assert result.item() > 0.0
@@ -240,9 +240,7 @@ class TestOrderPenalty:
         logits[0, 5, d_idx] = 10.0
         input_lengths = torch.tensor([T])
 
-        result = loss_fn._compute_order_penalty(
-            logits, ["A0"], input_lengths
-        )
+        result = loss_fn._compute_order_penalty(logits, ["A0"], input_lengths)
         assert result.item() == 0.0
 
     def test_identical_chars_no_penalty(self):
@@ -257,9 +255,7 @@ class TestOrderPenalty:
         logits = torch.randn(1, T, cfg.union_alphabet_size)
         input_lengths = torch.tensor([T])
 
-        result = loss_fn._compute_order_penalty(
-            logits, ["AA"], input_lengths
-        )
+        result = loss_fn._compute_order_penalty(logits, ["AA"], input_lengths)
         assert result.item() == 0.0
 
     def test_penalty_is_differentiable(self):
@@ -283,9 +279,7 @@ class TestOrderPenalty:
         logits_data[0, 5, b_idx] = 10.0
         input_lengths = torch.tensor([T])
 
-        penalty = loss_fn._compute_order_penalty(
-            logits, ["AB"], input_lengths
-        )
+        penalty = loss_fn._compute_order_penalty(logits, ["AB"], input_lengths)
         assert penalty.item() > 0.0
 
         # Gradient must flow through
@@ -312,9 +306,7 @@ class TestOrderPenalty:
         logits[0, 5, b_idx] = 10.0
         input_lengths = torch.tensor([T])
 
-        result = loss_fn._compute_order_penalty(
-            logits, ["AB"], input_lengths
-        )
+        result = loss_fn._compute_order_penalty(logits, ["AB"], input_lengths)
         # diff ≈ 3, margin = 5 → penalty = max(3 - 5, 0) = 0
         assert result.item() == 0.0
 
@@ -392,9 +384,7 @@ class TestOrderPenalty:
         logits[0, 10, a_idx] = 10.0
         logits[0, 5, dash_idx] = 10.0
         input_lengths = torch.tensor([T])
-        result = loss_fn._compute_order_penalty(
-            logits, ["A-"], input_lengths
-        )
+        result = loss_fn._compute_order_penalty(logits, ["A-"], input_lengths)
         assert result.item() == 0.0
 
 

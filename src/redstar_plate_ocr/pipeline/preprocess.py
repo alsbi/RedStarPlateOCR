@@ -12,8 +12,6 @@ import torch
 from numpy.typing import NDArray
 
 from redstar_plate_ocr.pipeline.enhancement import (
-    QualityAssessor,
-    SmartEnhancer,
     build_enhancement_stack,
 )
 
@@ -40,12 +38,14 @@ def auto_unpad(image: np.ndarray, threshold: float = 3.0) -> np.ndarray:
     corner_size = max(1, min(h, w) // 20)
     corner_size = min(corner_size, h // 4, w // 4)
 
-    corners = np.concatenate([
-        image[:corner_size, :corner_size].reshape(-1, 3),
-        image[:corner_size, -corner_size:].reshape(-1, 3),
-        image[-corner_size:, :corner_size].reshape(-1, 3),
-        image[-corner_size:, -corner_size:].reshape(-1, 3),
-    ])
+    corners = np.concatenate(
+        [
+            image[:corner_size, :corner_size].reshape(-1, 3),
+            image[:corner_size, -corner_size:].reshape(-1, 3),
+            image[-corner_size:, :corner_size].reshape(-1, 3),
+            image[-corner_size:, -corner_size:].reshape(-1, 3),
+        ]
+    )
 
     # If corners are not uniform -> not a pre-canvased image
     corner_std = corners.std()
@@ -85,7 +85,14 @@ def auto_unpad(image: np.ndarray, threshold: float = 3.0) -> np.ndarray:
 
     logger.debug(
         "auto_unpad: %dx%d → %dx%d (crop rows %d:%d, cols %d:%d)",
-        h, w, bottom - top, right - left, top, bottom, left, right,
+        h,
+        w,
+        bottom - top,
+        right - left,
+        top,
+        bottom,
+        left,
+        right,
     )
     return image[top:bottom, left:right]
 
@@ -101,12 +108,13 @@ class PreprocessPipeline:
     def __init__(
         self,
         canvas_height: int = 80,
-        canvas_width: int = 192,
+        canvas_width: int = 256,
         pad_color: int = 128,
         mean: list[float] | None = None,
         std: list[float] | None = None,
         augmentation: A.Compose | None = None,
         enhancement_config: dict[str, object] | None = None,
+        enhancement_enabled: bool = True,
         hooks: dict[str, Callable[[np.ndarray | torch.Tensor], None]]
         | None = None,
     ) -> None:
@@ -123,6 +131,7 @@ class PreprocessPipeline:
         )
         self.augmentation = augmentation
         self._hooks = hooks or {}
+        self.enhancement_enabled = enhancement_enabled
         self._assessor, self._enhancer = build_enhancement_stack(
             enhancement_config
         )
@@ -168,7 +177,11 @@ class PreprocessPipeline:
         img = image
 
         # Smart conditional enhancement
-        if self._assessor is not None and self._enhancer is not None:
+        if (
+            self.enhancement_enabled
+            and self._assessor is not None
+            and self._enhancer is not None
+        ):
             if self._assessor.needs_enhancement(img):
                 logger.debug(
                     "Enhancing crop: %s",

@@ -42,6 +42,7 @@ def _validate_region_and_type(
 
     plate_type = row.get("plate_type", "")
     from redstar_plate_ocr.plate.config import PLATE_TYPES  # cycle-avoid
+
     if plate_type not in PLATE_TYPES:
         return [
             f"Row {idx}: invalid plate_type "
@@ -65,8 +66,7 @@ def _validate_text_chars(
     bad = [c for c in plate_text if c not in alphabet]
     if bad:
         return [
-            f"Row {idx}: invalid chars {bad} in "
-            f"'{plate_text}' for {region}",
+            f"Row {idx}: invalid chars {bad} in '{plate_text}' for {region}",
         ]
     return []
 

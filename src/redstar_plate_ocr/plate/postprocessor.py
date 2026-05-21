@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from redstar_plate_ocr.plate.config import PlateConfig
-from redstar_plate_ocr.plate.confusion import adjacent_swap_correct, correct_confusions
+from redstar_plate_ocr.plate.confusion import (
+    adjacent_swap_correct,
+    correct_confusions,
+)
 from redstar_plate_ocr.plate.forbidden import ForbiddenFilter
 from redstar_plate_ocr.plate.pattern import PatternValidator
 from redstar_plate_ocr.plate.results import RawResult, RecognitionResult
@@ -80,13 +83,19 @@ class PostProcessor:
 
         # Step 3: forbidden filter
         text, needs_review = self._apply_forbidden(
-            text, needs_review, country, region, hypotheses,
+            text,
+            needs_review,
+            country,
+            region,
+            hypotheses,
         )
 
         # Step 4: pattern validation
         if region is not None:
             text, needs_review = self._apply_pattern_validation(
-                text, needs_review, region,
+                text,
+                needs_review,
+                region,
             )
 
         return RecognitionResult(

@@ -7,6 +7,14 @@ from torch import Tensor, nn
 
 _ATTN_MASK_VALUE = -1e4  # Large negative for attention masking
 
+# Safety margin added to input_lengths so the last character's CTC
+# emissions are not clipped during greedy_decode.  Empirically 4 extra
+# timesteps cover the tail of the CTC alignment.
+_CTC_LENGTH_MARGIN = 4
+
+# Initialisation scale for row embeddings (top/bottom distinction).
+_ROW_EMB_INIT_SCALE = 0.02
+
 
 class AttentionPool(nn.Module):
     """Learnable attention-based pooling over height dimension."""
@@ -41,12 +49,12 @@ class AttentionPool(nn.Module):
 
 
 class AdaptiveCompression(nn.Module):
-    """Adaptive compression: standard -> (B,48,C), square -> (B,96,C)."""
+    """Adaptive compression: standard -> (B,W,C), square -> (B,2W,C)."""
 
     def __init__(
         self,
         canvas_height: int = 80,
-        canvas_width: int = 192,
+        canvas_width: int = 256,
         stride: int = 4,
         in_channels: int = 256,
     ) -> None:
@@ -55,6 +63,34 @@ class AdaptiveCompression(nn.Module):
         self.feat_h = canvas_height // stride
         self.feat_w = canvas_width // stride
         self.attn_pool = AttentionPool(in_channels)
+        # Row embedding for square plates — distinguishes top/bottom rows
+        self.row_emb = nn.Parameter(
+            torch.randn(2, in_channels, 1) * _ROW_EMB_INIT_SCALE
+        )
+
+    def _load_from_state_dict(
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
+        """Backward-compat: ``row_emb`` added after v1 checkpoints."""
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
+        row_key = f"{prefix}row_emb"
+        if row_key in missing_keys:
+            missing_keys.remove(row_key)
 
     def compute_input_lengths(
         self,
@@ -90,7 +126,7 @@ class AdaptiveCompression(nn.Module):
         result = torch.where(is_sq, sq_lengths, col_present)
         # Add a small safety margin so the last character's CTC
         # emissions are not clipped during greedy_decode.
-        result = result + 4
+        result = result + _CTC_LENGTH_MARGIN
         return result.clamp(min=1)
 
     def compute_content_mask(
@@ -123,7 +159,7 @@ class AdaptiveCompression(nn.Module):
         features: (B, C, H, W)
         orig_h, orig_w: (B,) original image dims
         content_mask: optional pre-computed (B, 1, feat_h, feat_w)
-        -> (B, W, C) = (B, 48, C)
+        -> (B, W, C) where W = canvas_width // stride
         """
         if content_mask is None:
             content_mask = self.compute_content_mask(orig_h, orig_w)
@@ -142,7 +178,7 @@ class AdaptiveCompression(nn.Module):
         features: (B, C, H, W)
         orig_h, orig_w: (B,) original image dims
         content_mask: optional pre-computed (B, 1, feat_h, feat_w)
-        -> (B, 2*W, C) = (B, 96, C)
+        -> (B, 2*W, C) where W = canvas_width // stride
         """
         if content_mask is None:
             content_mask = self.compute_content_mask(orig_h, orig_w)
@@ -153,6 +189,9 @@ class AdaptiveCompression(nn.Module):
         bot_m = content_mask[:, :, mid:, :]
         top_mean = self._pool(top_f, top_m)
         bot_mean = self._pool(bot_f, bot_m)
+        # Row embedding — distinguishes top/bottom rows for square plates
+        top_mean = top_mean + self.row_emb[0]  # broadcasts over (B,C,W)
+        bot_mean = bot_mean + self.row_emb[1]
         combined = torch.cat([top_mean, bot_mean], dim=2)
         return combined.permute(0, 2, 1)
 

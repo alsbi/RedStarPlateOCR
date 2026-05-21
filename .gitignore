@@ -254,3 +254,5 @@ node_modules/
 
 # Asdf
 .tool-versions
+/scripts/
+/.roomodes

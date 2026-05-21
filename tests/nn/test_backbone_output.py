@@ -33,7 +33,7 @@ class TestBackboneOutput:
             stage2_blocks=1,
             stage3_blocks=0,
         )
-        x = torch.randn(1, 3, 80, 192)
+        x = torch.randn(1, 3, 80, 256)
         out = model(x)
         assert isinstance(out, BackboneOutput)
 
@@ -47,9 +47,9 @@ class TestBackboneOutput:
             stage2_blocks=1,
             stage3_blocks=0,
         )
-        x = torch.randn(1, 3, 80, 192)
+        x = torch.randn(1, 3, 80, 256)
         out = model(x)
-        assert out.stage1.shape == (1, 32, 40, 96)
+        assert out.stage1.shape == (1, 32, 40, 128)
 
     def test_final_shape(self) -> None:
         """final has (B, C2, H/4, W/4) shape."""
@@ -61,14 +61,14 @@ class TestBackboneOutput:
             stage2_blocks=1,
             stage3_blocks=0,
         )
-        x = torch.randn(1, 3, 80, 192)
+        x = torch.randn(1, 3, 80, 256)
         out = model(x)
-        assert out.final.shape == (1, 64, 20, 48)
+        assert out.final.shape == (1, 64, 20, 64)
 
     def test_default_backbone_output(self) -> None:
         """Default PlateBackbone returns BackboneOutput."""
         model = PlateBackbone()
-        x = torch.randn(1, 3, 80, 192)
+        x = torch.randn(1, 3, 80, 256)
         out = model(x)
         assert isinstance(out, BackboneOutput)
         assert out.stage1.shape[1] == 128

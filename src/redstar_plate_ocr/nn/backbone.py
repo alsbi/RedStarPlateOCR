@@ -109,12 +109,14 @@ class PlateBackbone(nn.Module):
         stage1_blocks: int = 2,
         stage2_channels: int = 256,
         stage2_blocks: int = 3,
+        stage3_channels: int | None = None,
         stage3_blocks: int = 0,
         se_reduction: int = 4,
         drop_path_rate: float = 0.05,
         attention: str = "se",
     ):
         super().__init__()
+        self._final_channels = stage3_channels or stage2_channels
         self.stem = self._build_stem(stem_channels)
         self._stem_to_stage1 = self._build_stem_to_stage1(
             stem_channels, stage1_channels
@@ -129,17 +131,29 @@ class PlateBackbone(nn.Module):
         self.stage2 = self._build_stage(
             stage2_channels, se_reduction, dp_rates, attention, stage2_blocks
         )
+        s3_ch = stage3_channels or stage2_channels
+        if stage3_channels is not None and stage3_channels != stage2_channels:
+            self.expand_stage3 = self._build_expand(stage2_channels, s3_ch)
+        else:
+            self.expand_stage3 = None
         self.stage3 = self._build_stage(
-            stage2_channels, se_reduction, dp_rates, attention, stage3_blocks,
-            offset=stage2_blocks
+            s3_ch,
+            se_reduction,
+            dp_rates,
+            attention,
+            stage3_blocks,
+            offset=stage2_blocks,
         )
+
+    @property
+    def final_channels(self) -> int:
+        """Number of channels in the final backbone output."""
+        return self._final_channels
 
     @staticmethod
     def _build_stem(channels: int) -> nn.Sequential:
         return nn.Sequential(
-            nn.Conv2d(
-                3, channels, 3, stride=2, padding=1, bias=False
-            ),
+            nn.Conv2d(3, channels, 3, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(channels),
             nn.SiLU(inplace=True),
         )
@@ -183,16 +197,28 @@ class PlateBackbone(nn.Module):
         )
 
     @staticmethod
-    def _build_down(
-        in_channels: int, out_channels: int
-    ) -> nn.Sequential:
+    def _build_down(in_channels: int, out_channels: int) -> nn.Sequential:
         return nn.Sequential(
             nn.Conv2d(
-                in_channels, in_channels, 3,
-                stride=2, padding=1, groups=in_channels, bias=False,
+                in_channels,
+                in_channels,
+                3,
+                stride=2,
+                padding=1,
+                groups=in_channels,
+                bias=False,
             ),
             nn.BatchNorm2d(in_channels),
             nn.SiLU(inplace=True),
+            nn.Conv2d(in_channels, out_channels, 1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.SiLU(inplace=True),
+        )
+
+    @staticmethod
+    def _build_expand(in_channels: int, out_channels: int) -> nn.Sequential:
+        """1×1 conv expand from stage2 to stage3 channels."""
+        return nn.Sequential(
             nn.Conv2d(in_channels, out_channels, 1, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.SiLU(inplace=True),
@@ -204,10 +230,7 @@ class PlateBackbone(nn.Module):
     ) -> list[float]:
         total = stage2_blocks + stage3_blocks
         if total > 1:
-            return [
-                drop_path_rate * i / (total - 1)
-                for i in range(total)
-            ]
+            return [drop_path_rate * i / (total - 1) for i in range(total)]
         if total == 1:
             return [drop_path_rate]
         return []
@@ -217,5 +240,7 @@ class PlateBackbone(nn.Module):
         stage1_out = self.stage1(self._stem_to_stage1(x))
         x = self.down(stage1_out)
         x = self.stage2(x)
+        if self.expand_stage3 is not None:
+            x = self.expand_stage3(x)
         x = self.stage3(x)
         return BackboneOutput(stage1=stage1_out, final=x)

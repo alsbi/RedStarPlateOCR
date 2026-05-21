@@ -6,10 +6,10 @@ import pytest
 
 @pytest.fixture
 def sample_image():
-    """Create a simple test image (80x192 white rectangle)."""
+    """Create a simple test image (80x256 white rectangle)."""
     import numpy as np
 
-    return np.ones((80, 192, 3), dtype=np.uint8) * 255
+    return np.ones((80, 256, 3), dtype=np.uint8) * 255
 
 
 def test_pytorch_recognizer_returns_result(

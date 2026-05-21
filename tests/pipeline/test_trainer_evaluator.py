@@ -94,14 +94,14 @@ def test_evaluator_metrics(plate_config: PlateConfig):
 def _make_mock_batch() -> dict:
     """Create a mock batch dict for evaluator test."""
     bsz = 2
-    images = torch.randn(bsz, 3, 80, 192)
+    images = torch.randn(bsz, 3, 80, 256)
     return {
         "image": images,
         "plate_text": ["A000AA00", "A111BB11"],
         "region": ["RU", "RU"],
         "plate_type": ["standard", "standard"],
         "orig_h": torch.tensor([80, 80]),
-        "orig_w": torch.tensor([192, 192]),
+        "orig_w": torch.tensor([256, 256]),
     }
 
 

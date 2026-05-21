@@ -131,7 +131,10 @@ def correct_confusions(
 
     for pattern in patterns:
         corrected, n_fixes = _correct_against_pattern(
-            text, pattern, letters_fs, digits_fs,
+            text,
+            pattern,
+            letters_fs,
+            digits_fs,
         )
         if n_fixes < best_fixes:
             best_fixes = n_fixes
@@ -159,9 +162,7 @@ def _correct_against_pattern(
     for pc in pattern:
         if ti >= len(text):
             break
-        ti, fix = _handle_slot(
-            text, ti, pc, letters_fs, digits_fs, result
-        )
+        ti, fix = _handle_slot(text, ti, pc, letters_fs, digits_fs, result)
         fixes += fix
 
     # Append any remaining characters (shouldn't happen for valid plates)
@@ -181,9 +182,86 @@ def _check_pattern_perfect(
 ) -> bool:
     """Check if text matches pattern with zero corrections."""
     _, fixes = _correct_against_pattern(
-        text, pattern, letters_fs, digits_fs,
+        text,
+        pattern,
+        letters_fs,
+        digits_fs,
     )
     return fixes == 0
+
+
+def _should_skip_swap(
+    text: str,
+    patterns: list[str],
+    ctc_logits: object | None,
+    ctc_alignment: list[int] | None,
+    alphabet: str,
+    text_confidence: float,
+    threshold: float,
+) -> bool:
+    """Return True if swap correction should be skipped."""
+    alignment_len = len(ctc_alignment) if ctc_alignment else 0
+    return any(
+        [
+            len(text) < 2,
+            not patterns,
+            ctc_logits is None,
+            ctc_alignment is None,
+            not alphabet,
+            alignment_len != len(text),
+            text_confidence >= threshold,
+        ]
+    )
+
+
+def _is_same_type_pair(
+    a: str,
+    b: str,
+    letters_fs: frozenset[str],
+    digits_fs: frozenset[str],
+) -> bool:
+    """Check if two characters are same-type (both letters or both digits)."""
+    return (a in letters_fs and b in letters_fs) or (
+        a in digits_fs and b in digits_fs
+    )
+
+
+def _get_char_index(char: str, alphabet: str) -> int:
+    """Get index of char in alphabet, or -1 if not found."""
+    return alphabet.index(char) if char in alphabet else -1
+
+
+def _try_swap_pair(
+    i: int,
+    result: list[str],
+    result_alignment: list[int],
+    letters_fs: frozenset[str],
+    digits_fs: frozenset[str],
+    ctc_logits: object,
+    alphabet: str,
+    swap_margin: float,
+) -> int:
+    """Try swapping adjacent pair at position *i*; return next position."""
+    a, b = result[i], result[i + 1]
+    if not _is_same_type_pair(a, b, letters_fs, digits_fs):
+        return i + 1
+    if a == b:
+        return i + 1
+
+    t1 = result_alignment[i]
+    t2 = result_alignment[i + 1]
+    a_idx = _get_char_index(a, alphabet)
+    b_idx = _get_char_index(b, alphabet)
+    if min(a_idx, b_idx) < 0:
+        return i + 1
+
+    current_score = ctc_logits[t1, a_idx].item() + ctc_logits[t2, b_idx].item()
+    swapped_score = ctc_logits[t1, b_idx].item() + ctc_logits[t2, a_idx].item()
+
+    if swapped_score > current_score + swap_margin:
+        result[i], result[i + 1] = b, a
+        return i + 2
+    return i + 1
 
 
 def adjacent_swap_correct(
@@ -249,14 +327,15 @@ def adjacent_swap_correct(
         Corrected text if logit evidence supports a swap, else
         the original text.
     """
-    if len(text) < 2 or not patterns:
-        return text
-    if ctc_logits is None or ctc_alignment is None or not alphabet:
-        return text
-    if len(ctc_alignment) != len(text):
-        return text
-    # Don't touch high-confidence predictions — the model is sure.
-    if text_confidence >= swap_confidence_threshold:
+    if _should_skip_swap(
+        text,
+        patterns,
+        ctc_logits,
+        ctc_alignment,
+        alphabet,
+        text_confidence,
+        swap_confidence_threshold,
+    ):
         return text
 
     import torch
@@ -274,41 +353,16 @@ def adjacent_swap_correct(
 
     i = 0
     while i < len(result) - 1:
-        a, b = result[i], result[i + 1]
-        # Only swap same-type pairs (letter-letter or digit-digit)
-        both_letters = a in letters_fs and b in letters_fs
-        both_digits = a in digits_fs and b in digits_fs
-        if not (both_letters or both_digits):
-            i += 1
-            continue
-        if a == b:
-            i += 1
-            continue  # swapping identical chars is pointless
-
-        t1 = result_alignment[i]
-        t2 = result_alignment[i + 1]
-        a_idx = alphabet.index(a) if a in alphabet else -1
-        b_idx = alphabet.index(b) if b in alphabet else -1
-        if a_idx < 0 or b_idx < 0:
-            i += 1
-            continue
-
-        # Current: char a at t1, char b at t2
-        current_score = (
-            ctc_logits[t1, a_idx].item() + ctc_logits[t2, b_idx].item()
+        i = _try_swap_pair(
+            i,
+            result,
+            result_alignment,
+            letters_fs,
+            digits_fs,
+            ctc_logits,
+            alphabet,
+            swap_margin,
         )
-        # Swapped: char b at t1, char a at t2
-        swapped_score = (
-            ctc_logits[t1, b_idx].item() + ctc_logits[t2, a_idx].item()
-        )
-
-        if swapped_score > current_score + swap_margin:
-            # Model's own logits significantly prefer the swapped order
-            result[i], result[i + 1] = b, a
-            # Keep alignment as-is (timesteps stay with positions)
-            i += 2  # skip past the swapped pair
-        else:
-            i += 1
 
     return "".join(result)
 

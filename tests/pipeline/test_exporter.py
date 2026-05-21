@@ -199,7 +199,7 @@ class TestONNXRecognizer:
             )
 
             rec = ONNXRecognizer(onnx_path, pc)
-            image = np.zeros((80, 192, 3), dtype=np.uint8)
+            image = np.zeros((80, 256, 3), dtype=np.uint8)
             result = rec.recognize(image)
             assert isinstance(result, RecognitionResult)
             assert isinstance(result.text, str)
@@ -236,7 +236,7 @@ class TestONNXRecognizer:
             rec = ONNXRecognizer(onnx_path)
             assert rec.plate_config.country_list == pc.country_list
 
-            image = np.zeros((80, 192, 3), dtype=np.uint8)
+            image = np.zeros((80, 256, 3), dtype=np.uint8)
             result = rec.recognize(image)
             assert isinstance(result, RecognitionResult)
 
@@ -268,4 +268,3 @@ class TestONNXRecognizer:
 
             with pytest.raises(ValueError, match="plate_config not provided"):
                 ONNXRecognizer(onnx_path)
-

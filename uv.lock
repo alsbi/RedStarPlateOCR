@@ -1298,6 +1298,7 @@ source = { editable = "." }
 dependencies = [
     { name = "albumentations" },
     { name = "numpy" },
+    { name = "onnx" },
     { name = "opencv-python-headless" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -1353,6 +1354,7 @@ requires-dist = [
     { name = "basedpyright", marker = "extra == 'dev'" },
     { name = "bs4", marker = "extra == 'scrape'" },
     { name = "numpy", specifier = ">=2.0" },
+    { name = "onnx", specifier = ">=1.21.0" },
     { name = "onnx", marker = "extra == 'export'", specifier = ">=1.21.0" },
     { name = "onnxruntime", marker = "extra == 'export'", specifier = ">=1.25.0" },
     { name = "onnxscript", marker = "extra == 'export'", specifier = ">=0.7.0" },

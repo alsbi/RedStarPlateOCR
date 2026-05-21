@@ -16,16 +16,16 @@ class TestNormalizeInplace:
     def test_normalize_produces_finite_values(self) -> None:
         """In-place нормализация даёт конечные значения."""
         pipe = PreprocessPipeline()
-        img = np.random.randint(0, 255, (80, 192, 3), dtype=np.uint8)
+        img = np.random.randint(0, 255, (80, 256, 3), dtype=np.uint8)
         tensor, _, _ = pipe(img)
         assert tensor.isfinite().all()
 
     def test_normalize_shape_preserved(self) -> None:
         """Форма тензора корректна после in-place нормализации."""
         pipe = PreprocessPipeline()
-        img = np.random.randint(0, 255, (80, 192, 3), dtype=np.uint8)
+        img = np.random.randint(0, 255, (80, 256, 3), dtype=np.uint8)
         tensor, _, _ = pipe(img)
-        assert tensor.shape == (3, 80, 192)
+        assert tensor.shape == (3, 80, 256)
 
 
 # --- _oversample_square ---

@@ -49,6 +49,10 @@ def test_run_train_epoch_returns_avg_batch_ms():
     trainer.config.gradient_accumulation_steps = 1
     trainer.config.gradient_clip = 1.0
     trainer.config.update_every_n_batches = 1
+    trainer.config.char_aux_weight = 0.3
+    trainer.config.char_aux_peak_weight = None
+    trainer.config.char_aux_ramp_epochs = 0
+    trainer.config.epochs = 10
     trainer._interrupt_requested = False
 
     output = MagicMock()

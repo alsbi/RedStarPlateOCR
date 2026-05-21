@@ -18,6 +18,8 @@ from redstar_plate_ocr.pipeline.utils import (
 )
 
 if TYPE_CHECKING:
+    from redstar_plate_ocr.data.severe_aug import SevereAugScheduler
+    from redstar_plate_ocr.pipeline.tracking import MetricsTracker
     from redstar_plate_ocr.pipeline.trainer import Trainer
 
 _ValidationResult = tuple[
@@ -167,8 +169,12 @@ class _ValidationOutcome:
     def __iter__(self):
         """Unpack like a tuple."""
         yield from (
-            self.val_metrics, self.last_metrics, self.best_metric,
-            self.best_metrics, self.patience_counter, self.should_stop,
+            self.val_metrics,
+            self.last_metrics,
+            self.best_metric,
+            self.best_metrics,
+            self.patience_counter,
+            self.should_stop,
         )
 
 
@@ -182,6 +188,7 @@ def _run_validation(
     best_metrics: dict[str, float],
     patience_counter: int,
     progress_display: ProgressDisplay,
+    severe_scheduler: SevereAugScheduler | None = None,
 ) -> _ValidationOutcome:
     """Run validation, update best metrics, and check early stopping."""
     progress_display.show_validation("⏳ Validating...")
@@ -205,9 +212,7 @@ def _run_validation(
     )
     trainer._save_checkpoint("last.pt", epoch, sched_val)
 
-    improved = _check_improvement(
-        sched_val, best_metric, config.es_mode
-    )
+    improved = _check_improvement(sched_val, best_metric, config.es_mode)
     if improved:
         best_metric = sched_val
         best_metrics = dict(val_metrics)
@@ -219,16 +224,230 @@ def _run_validation(
         )
     else:
         patience_counter += 1
-        if patience_counter >= config.es_patience:
+        # Early stopping with warmup condition:
+        # disabled while severe augmentation is active.
+        # After severe is off, use scheduler's own patience
+        # to avoid shared-state conflict with update_schedule.
+        if severe_scheduler is not None:
+            if severe_scheduler.severe_severity > 0:
+                # Severe augmentation still active — skip early stopping
+                # to avoid premature termination while model adapts.
+                pass
+            elif patience_counter >= severe_scheduler.early_stop_patience:
+                return _ValidationOutcome(
+                    val_metrics,
+                    last_metrics,
+                    best_metric,
+                    best_metrics,
+                    patience_counter,
+                    True,
+                )
+        elif patience_counter >= config.es_patience:
             return _ValidationOutcome(
-                val_metrics, last_metrics, best_metric,
-                best_metrics, patience_counter, True,
+                val_metrics,
+                last_metrics,
+                best_metric,
+                best_metrics,
+                patience_counter,
+                True,
             )
 
+    # Update severe scheduler after validation
+    if severe_scheduler is not None:
+        word_acc = val_metrics.get("val_plate_accuracy", 0.0)
+        severe_scheduler.update_schedule(word_acc, epoch)
+        logger.info(
+            "Warmup schedule: severe=%.3f, "
+            "std=%.3f, "
+            "preprocessing=%s, "
+            "best_acc=%.4f",
+            severe_scheduler.severe_severity,
+            severe_scheduler.std_severity,
+            "on" if severe_scheduler.preprocessing_enabled else "off",
+            severe_scheduler.best_word_acc,
+        )
+        _update_warmup_display(
+            progress_display,
+            severe_scheduler,
+        )
+
     return _ValidationOutcome(
-        val_metrics, last_metrics, best_metric,
-        best_metrics, patience_counter, False,
+        val_metrics,
+        last_metrics,
+        best_metric,
+        best_metrics,
+        patience_counter,
+        False,
     )
+
+
+def _update_warmup_display(
+    progress_display: ProgressDisplay,
+    severe_scheduler: SevereAugScheduler,
+) -> None:
+    """Update warmup status line in progress display."""
+    preproc_str = "on" if severe_scheduler.preprocessing_enabled else "off"
+    text = (
+        f"🔥 Warmup: severe={severe_scheduler.severe_severity:.3f} "
+        f"std={severe_scheduler.std_severity:.3f} "
+        f"preproc={preproc_str} "
+        f"best_acc={severe_scheduler.best_word_acc:.4f}"
+    )
+    progress_display.update_warmup_status(text)
+
+
+def _build_train_metrics(
+    train_result: dict[str, float],
+) -> dict[str, float]:
+    """Build train-related metrics for logging."""
+    cur_lr = train_result.get("lr", 0.0)
+    return {
+        "train/loss": train_result.get("loss", 0.0),
+        "train/ctc_loss": train_result.get("ctc", 0.0),
+        "train/format_loss": train_result.get("format", 0.0),
+        "train/country_loss": train_result.get("country", 0.0),
+        "train/order_loss": train_result.get("order", 0.0),
+        "train/char_aux_loss": train_result.get("char_aux", 0.0),
+        "train/synergy_loss": train_result.get("synergy", 0.0),
+        "train/length_loss": train_result.get("length", 0.0),
+        "train/format_acc": train_result.get("fmt_acc", 0.0),
+        "train/country_acc": train_result.get("ctry_acc", 0.0),
+        "train/plate_acc": train_result.get("plate_acc", 0.0),
+        "train/char_acc": train_result.get("char_acc", 0.0),
+        "train/lr": cur_lr,
+    }
+
+
+def _build_val_core_metrics(
+    val_metrics: dict[str, float],
+) -> dict[str, float]:
+    """Build core validation metrics for logging."""
+    return {
+        "val/cer": val_metrics.get("val_cer", 0.0),
+        "val/plate_accuracy": val_metrics.get(
+            "val_plate_accuracy",
+            0.0,
+        ),
+        "val/char_accuracy": val_metrics.get(
+            "val_char_accuracy",
+            0.0,
+        ),
+        "val/ned": val_metrics.get("val_ned", 0.0),
+        "val/format_acc": val_metrics.get(
+            "val_format_accuracy",
+            0.0,
+        ),
+        "val/country_acc": val_metrics.get(
+            "val_country_accuracy",
+            0.0,
+        ),
+        "val/square_accuracy": val_metrics.get(
+            "val_square_accuracy",
+            0.0,
+        ),
+        "val/standard_accuracy": val_metrics.get(
+            "val_standard_accuracy",
+            0.0,
+        ),
+    }
+
+
+def _collect_prefixed_metrics(
+    val_metrics: dict[str, float],
+    src_prefix: str,
+    exclude_prefix: str | None,
+    dst_prefix: str,
+) -> dict[str, float]:
+    """Collect metrics whose keys start with *src_prefix*.
+
+    If *exclude_prefix* is given, keys starting with it are skipped.
+    The collected keys have *src_prefix* replaced by *dst_prefix*.
+    """
+    result: dict[str, float] = {}
+    for key, value in val_metrics.items():
+        if not key.startswith(src_prefix):
+            continue
+        if exclude_prefix and key.startswith(exclude_prefix):
+            continue
+        suffix = key.removeprefix(src_prefix)
+        result[f"{dst_prefix}{suffix}"] = value
+    return result
+
+
+def _log_metrics(
+    tracker: MetricsTracker,
+    epoch: int,
+    train_result: dict[str, float],
+    val_metrics: dict[str, float],
+    severe_scheduler: SevereAugScheduler | None = None,
+) -> None:
+    """Log all metrics via TrackIO / console."""
+    metrics_to_log: dict[str, float] = {}
+    metrics_to_log.update(_build_train_metrics(train_result))
+    metrics_to_log.update(_build_val_core_metrics(val_metrics))
+
+    # Warmup status
+    if severe_scheduler is not None:
+        metrics_to_log["warmup/severe_severity"] = (
+            severe_scheduler.severe_severity
+        )
+        metrics_to_log["warmup/std_severity"] = severe_scheduler.std_severity
+
+    # Per-country metrics (CER + plate accuracy)
+    metrics_to_log.update(
+        _collect_prefixed_metrics(
+            val_metrics,
+            "val_cer_",
+            "val_cer_fmt_",
+            "val/cer_",
+        )
+    )
+    metrics_to_log.update(
+        _collect_prefixed_metrics(
+            val_metrics,
+            "val_plateacc_",
+            "val_plateacc_fmt_",
+            "val/plateacc_",
+        )
+    )
+
+    # Per-format metrics (CER + plate accuracy)
+    metrics_to_log.update(
+        _collect_prefixed_metrics(
+            val_metrics,
+            "val_cer_fmt_",
+            None,
+            "val/cer_fmt_",
+        )
+    )
+    metrics_to_log.update(
+        _collect_prefixed_metrics(
+            val_metrics,
+            "val_plateacc_fmt_",
+            None,
+            "val/plateacc_fmt_",
+        )
+    )
+
+    # Per-region plate accuracy
+    metrics_to_log.update(
+        _collect_prefixed_metrics(
+            val_metrics,
+            "val_region_",
+            None,
+            "val/region_",
+        )
+    )
+
+    # BSR / ATR — always log when available
+    bsr = val_metrics.get("val_bigram_swap_rate")
+    atr = val_metrics.get("val_adjacent_transposition_rate")
+    if bsr is not None:
+        metrics_to_log["val/bigram_swap_rate"] = bsr
+    if atr is not None:
+        metrics_to_log["val/adjacent_transposition_rate"] = atr
+
+    tracker.log(metrics_to_log, step=epoch)
 
 
 def process_epoch(
@@ -241,10 +460,12 @@ def process_epoch(
     best_metrics: dict[str, float],
     patience_counter: int,
     epoch_start: float = 0.0,
+    severe_scheduler: SevereAugScheduler | None = None,
+    tracker: MetricsTracker | None = None,
 ) -> _EpochResult:
     """Process one training epoch."""
     config: TrainingConfig = trainer.config
-    phase = _get_phase(config, epoch)
+    phase = _get_phase(config, epoch, severe_scheduler)
     cur_lr = trainer.optimizer.param_groups[0]["lr"]
     desc = f"Epoch {epoch + 1}/{config.epochs} [{phase}] LR={cur_lr:.4f}"
 
@@ -259,6 +480,11 @@ def process_epoch(
         total=len(train_loader),
         stats="",
     )
+    # Warmup status line: only shown when enable_warmup=True
+    if severe_scheduler is not None:
+        _update_warmup_display(progress_display, severe_scheduler)
+    else:
+        progress_display.hide_warmup_status()
     progress_display.update_epoch_summary(
         format_train_epoch_stats(0.0, best_metrics)
     )
@@ -269,6 +495,9 @@ def process_epoch(
         batch_task,
         epoch_start=epoch_start,
         current_epoch=epoch,
+        tracker=tracker,
+        log_interval=config.log_interval,
+        log_grad_interval=config.log_grad_interval,
     )
 
     train_loss = train_result.get("loss", 0.0)
@@ -290,14 +519,24 @@ def process_epoch(
 
     if should_validate:
         result = _run_validation(
-            trainer, val_loader, train_result, config,
-            epoch, best_metric, best_metrics, patience_counter,
+            trainer,
+            val_loader,
+            train_result,
+            config,
+            epoch,
+            best_metric,
+            best_metrics,
+            patience_counter,
             progress_display,
+            severe_scheduler=severe_scheduler,
         )
         if result.should_stop:
             return _make_stop_result(
-                best_metric, best_metrics,
-                result.last_metrics, result.patience_counter, epoch,
+                best_metric,
+                best_metrics,
+                result.last_metrics,
+                result.patience_counter,
+                epoch,
             )
         val_metrics = result.val_metrics
         last_metrics = result.last_metrics
@@ -305,6 +544,17 @@ def process_epoch(
         best_metrics = result.best_metrics
         patience_counter = result.patience_counter
         is_cached = False
+
+        # Log metrics to TrackIO / console after validation
+        if tracker is not None:
+            train_result["lr"] = cur_lr
+            _log_metrics(
+                tracker,
+                epoch,
+                train_result,
+                val_metrics,
+                severe_scheduler=severe_scheduler,
+            )
     else:
         # Skip validation — keep last known metrics
         trainer._save_checkpoint("last.pt", epoch, best_metric)
@@ -322,6 +572,16 @@ def process_epoch(
         logger,
         epoch_duration=epoch_duration,
     )
+    # Log warmup scheduler state after every epoch
+    if severe_scheduler is not None:
+        logger.info(
+            "Warmup: phase=%s severe=%.3f std=%.3f preproc=%s best_acc=%.4f",
+            phase,
+            severe_scheduler.severe_severity,
+            severe_scheduler.std_severity,
+            "on" if severe_scheduler.preprocessing_enabled else "off",
+            severe_scheduler.best_word_acc,
+        )
     epoch_stats = format_epoch_stats(
         val_metrics,
         best_metrics,
@@ -346,8 +606,11 @@ def process_epoch(
 def _get_phase(
     config: TrainingConfig,
     epoch: int,
+    severe_scheduler: SevereAugScheduler | None = None,
 ) -> str:
     """Get training phase name for given epoch."""
+    if severe_scheduler is not None and severe_scheduler.severe_severity > 0:
+        return "SevereWarmup"
     if epoch < config.warmup_epochs:
         return "Warmup"
     single_aug_end = config.warmup_epochs + config.single_aug_epochs

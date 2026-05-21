@@ -165,7 +165,11 @@ class PatternValidator:
         ti = 0
         for pc in self.pattern:
             out, corr, ti = _process_pattern_slot(
-                text, ti, pc, self.valid_letters, self.valid_digits,
+                text,
+                ti,
+                pc,
+                self.valid_letters,
+                self.valid_digits,
             )
             if out:
                 result.append(out)

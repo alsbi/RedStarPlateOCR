@@ -16,10 +16,10 @@ class TestMultiScaleFusion:
             stage1_channels=128,
             stage2_channels=256,
         )
-        stage1 = torch.randn(2, 128, 40, 96)  # H/2, W/2
-        stage2 = torch.randn(2, 256, 20, 48)  # H/4, W/4
+        stage1 = torch.randn(2, 128, 40, 128)  # H/2, W/2
+        stage2 = torch.randn(2, 256, 20, 64)  # H/4, W/4
         out = fusion(stage1, stage2)
-        assert out.shape == (2, 256, 20, 48)
+        assert out.shape == (2, 256, 20, 64)
 
     def test_lateral_uses_strided_conv(self) -> None:
         """Lateral connection uses Conv2d with stride=2."""
@@ -36,8 +36,8 @@ class TestMultiScaleFusion:
             stage1_channels=64,
             stage2_channels=128,
         )
-        s1 = torch.randn(1, 64, 40, 96, requires_grad=True)
-        s2 = torch.randn(1, 128, 20, 48, requires_grad=True)
+        s1 = torch.randn(1, 64, 40, 128, requires_grad=True)
+        s2 = torch.randn(1, 128, 20, 64, requires_grad=True)
         out = fusion(s1, s2)
         out.sum().backward()
         assert s1.grad is not None
@@ -51,10 +51,10 @@ class TestMultiScaleFusion:
             stage1_channels=192,
             stage2_channels=384,
         )
-        s1 = torch.randn(1, 192, 40, 96)
-        s2 = torch.randn(1, 384, 20, 48)
+        s1 = torch.randn(1, 192, 40, 128)
+        s2 = torch.randn(1, 384, 20, 64)
         out = fusion(s1, s2)
-        assert out.shape == (1, 384, 20, 48)
+        assert out.shape == (1, 384, 20, 64)
 
     def test_has_batchnorm(self) -> None:
         """Fusion has BatchNorm after lateral conv."""

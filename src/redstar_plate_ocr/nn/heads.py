@@ -6,6 +6,10 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+# Default canvas dimensions used in FormatHead for normalising orig_h/w.
+_FORMAT_CANVAS_H = 80
+_FORMAT_CANVAS_W = 256
+
 
 def _grid_pool(
     x: Tensor,
@@ -60,16 +64,16 @@ def _masked_pool_region(x: Tensor, mask: Tensor) -> Tensor:
         mask:  ``(B, 1, H, W)`` binary mask (1=content, 0=padding).
     """
     # Sum over spatial dims, divide by content-pixel count (per sample)
-    summed = (x * mask).sum(dim=(-2, -1))          # (B, C)
-    count = mask.sum(dim=(-2, -1)).clamp(min=1.0)   # (B, 1)
-    return summed / count                            # (B, C)
+    summed = (x * mask).sum(dim=(-2, -1))  # (B, C)
+    count = mask.sum(dim=(-2, -1)).clamp(min=1.0)  # (B, 1)
+    return summed / count  # (B, C)
 
 
 def _masked_global_pool(x: Tensor, mask: Tensor, repeat: int) -> Tensor:
     """Global masked average pool, repeated for grid compatibility."""
-    summed = (x * mask).sum(dim=(-2, -1))            # (B, C)
-    count = mask.sum(dim=(-2, -1)).clamp(min=1.0)     # (B, 1)
-    pooled = summed / count                           # (B, C)
+    summed = (x * mask).sum(dim=(-2, -1))  # (B, C)
+    count = mask.sum(dim=(-2, -1)).clamp(min=1.0)  # (B, 1)
+    pooled = summed / count  # (B, C)
     return pooled.repeat(1, repeat)
 
 
@@ -101,14 +105,17 @@ class FormatHead(nn.Module):
     ):
         super().__init__()
         # Shape encoder: tiny CNN on content_mask (1-channel binary map)
-        # feat_h=20, feat_w=48 → small enough for cheap conv
+        # feat_h=20, feat_w=64 → small enough for cheap conv
         self.shape_enc = nn.Sequential(
             nn.Conv2d(1, 8, 3, padding=1),
             nn.BatchNorm2d(8),
             nn.ReLU(inplace=True),
             nn.AdaptiveAvgPool2d(4),  # → (B, 8, 4, 4)
         )
-        shape_dim = 8 * 4 * 4  # 128
+        _SHAPE_ENC_CHANNELS = 8
+        _SHAPE_ENC_POOL = 4  # AdaptiveAvgPool2d output spatial size
+        shape_dim = _SHAPE_ENC_CHANNELS * _SHAPE_ENC_POOL**2  # 128
+        self._shape_dim = shape_dim
         # +2 for normalised h, w
         fc_in = shape_dim + 2
 
@@ -138,12 +145,12 @@ class FormatHead(nn.Module):
             x = x.flatten(1)  # (B, 128)
         else:
             # Fallback: zeros (e.g. ONNX with fixed dims)
-            x = torch.zeros(b, 128, device=device)
+            x = torch.zeros(b, self._shape_dim, device=device)
 
         # Append normalised plate dimensions
         if orig_h is not None and orig_w is not None:
-            h_ratio = orig_h.float().unsqueeze(1) / 80.0   # canvas_h
-            w_ratio = orig_w.float().unsqueeze(1) / 192.0   # canvas_w
+            h_ratio = orig_h.float().unsqueeze(1) / _FORMAT_CANVAS_H
+            w_ratio = orig_w.float().unsqueeze(1) / _FORMAT_CANVAS_W
             x = torch.cat([x, h_ratio, w_ratio], dim=1)
         else:
             x = torch.cat([x, torch.ones(b, 2, device=device)], dim=1)
@@ -271,7 +278,10 @@ class PositionAwareCountryHead(nn.Module):
         x = self.conv(features)
         if self._pos_aware:
             x = _grid_pool(
-                x, self._grid_rows, self._grid_cols, self.gap,
+                x,
+                self._grid_rows,
+                self._grid_cols,
+                self.gap,
                 mask=content_mask,
             )
         else:

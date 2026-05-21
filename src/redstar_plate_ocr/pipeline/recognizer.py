@@ -140,7 +140,8 @@ class _BaseRecognizer:
         # Greedy decode with alignment for adjacent-swap correction
         alphabet = self.plate_config.union_alphabet
         text, text_conf, alignment = greedy_decode_with_alignment(
-            output.ctc_tensor, alphabet,
+            output.ctc_tensor,
+            alphabet,
         )
 
         hypotheses = decoder.decode_n(

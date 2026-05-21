@@ -16,19 +16,46 @@ class CharAuxHead(nn.Module):
     When *content_mask* is provided, padding regions are zeroed out
     before pooling so the head cannot infer plate dimensions from
     the spatial layout of padding values.
+
+    When FiLM is enabled (*enable_film=True* and *num_countries*
+    provided), a :class:`ContextFiLM` modulates features after GAP
+    and before Conv1d projection.  Zero-initialised FiLM starts as
+    identity, preserving checkpoint compatibility.
     """
 
     def __init__(
         self,
         in_channels: int,
         max_alphabet_size: int,
+        enable_film: bool = False,
+        num_countries: int | None = None,
+        country_emb_dim: int = 128,
+        format_emb_dim: int = 64,
+        hidden_dim: int = 1024,
     ):
         super().__init__()
         self.gap = nn.AdaptiveAvgPool2d((1, None))  # pool H→1
         self.proj = nn.Conv1d(in_channels, max_alphabet_size, 1)
 
+        if enable_film and num_countries is not None:
+            from redstar_plate_ocr.nn.film import ContextFiLM
+
+            self.context_film = ContextFiLM(
+                num_countries=num_countries,
+                feature_dim=in_channels,
+                country_emb_dim=country_emb_dim,
+                format_emb_dim=format_emb_dim,
+                hidden_dim=hidden_dim,
+            )
+        else:
+            self.context_film = None  # type: ignore[assignment]
+
     def forward(
-        self, features: Tensor, content_mask: Tensor | None = None
+        self,
+        features: Tensor,
+        content_mask: Tensor | None = None,
+        country_idx: Tensor | None = None,
+        format_idx: Tensor | None = None,
     ) -> Tensor:
         """(B, C, H, W) → (B, W, max_alphabet_size)."""
         if content_mask is not None:
@@ -36,10 +63,17 @@ class CharAuxHead(nn.Module):
             # Masked average over H per (b, w) column
             # content_mask: (B, 1, H, W) -> count per col: (B, 1, W)
             count = content_mask.sum(dim=2).clamp(min=1.0)  # (B, 1, W)
-            summed = features.sum(dim=2)                     # (B, C, W)
-            x = summed / count                                # (B, C, W)
+            summed = features.sum(dim=2)  # (B, C, W)
+            x = summed / count  # (B, C, W)
         else:
             x = self.gap(features).squeeze(2)  # (B, C, W)
+
+        # FiLM modulation before projection
+        if self.context_film is not None:
+            x = x.permute(0, 2, 1)  # (B, W, C) для FiLM
+            x = self.context_film(x, country_idx, format_idx)
+            x = x.permute(0, 2, 1)  # обратно (B, C, W)
+
         x = self.proj(x)  # (B, max_alphabet, W)
         return x.permute(0, 2, 1)  # (B, W, max_alphabet)
 

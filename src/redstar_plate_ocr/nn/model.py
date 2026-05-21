@@ -9,6 +9,7 @@ from torch import Tensor
 from redstar_plate_ocr.nn.backbone import BackboneOutput, PlateBackbone
 from redstar_plate_ocr.nn.char_aux import CharAuxHead
 from redstar_plate_ocr.nn.compression import AdaptiveCompression
+from redstar_plate_ocr.nn.film import ContextFiLM
 from redstar_plate_ocr.nn.fusion import MultiScaleFusion
 from redstar_plate_ocr.nn.heads import (
     CountryHead,
@@ -22,8 +23,13 @@ from redstar_plate_ocr.nn.mask_table import (
     build_positional_mask_table,
 )
 from redstar_plate_ocr.nn.positional import SinusoidalPositionalEncoding
+from redstar_plate_ocr.nn.temporal import TemporalBridge
 from redstar_plate_ocr.nn.types import ModelOutput
 from redstar_plate_ocr.plate.config import PlateConfig
+
+# Fallback sequence length when neither standard nor square compressed
+# output is available (both paths skipped — extremely rare edge case).
+_DEFAULT_LSTM_MAX_LEN = 128
 
 
 class PlateOCRModel(nn.Module):
@@ -33,16 +39,22 @@ class PlateOCRModel(nn.Module):
     def _build_backbone(
         backbone_cfg: dict | None,
     ) -> tuple[PlateBackbone, int, int]:
-        """Build backbone and return (backbone, stage1_ch, stage2_ch)."""
+        """Build backbone and return (backbone, stage1_ch, final_ch).
+
+        final_ch is the number of channels in the backbone's final
+        output (stage3_channels if set, otherwise stage2_channels).
+        """
         bc = backbone_cfg or {}
         backbone = PlateBackbone(**bc)
         stage1_ch = bc.get("stage1_channels", 128)
         stage2_ch = bc.get("stage2_channels", 256)
-        return backbone, stage1_ch, stage2_ch
+        s3c = bc.get("stage3_channels")
+        final_ch = s3c if s3c is not None else stage2_ch
+        return backbone, stage1_ch, final_ch
 
     @staticmethod
     def _build_compression(
-        stage2_ch: int,
+        final_ch: int,
         canvas_height: int,
         canvas_width: int,
     ) -> AdaptiveCompression:
@@ -50,13 +62,18 @@ class PlateOCRModel(nn.Module):
         return AdaptiveCompression(
             canvas_height=canvas_height,
             canvas_width=canvas_width,
-            in_channels=stage2_ch,
+            in_channels=final_ch,
         )
 
     # Aspect-ratio threshold: w/h < threshold → square, >= → standard.
     # Based on dataset analysis (max square ratio=1.91, min standard=2.00),
     # threshold=2.0 gives 100% separation on real data.
     FORMAT_RATIO_THRESHOLD: float = 2.0
+
+    # When FormatHead confidence (softmax max prob) falls below this
+    # threshold during inference, we override its prediction with the
+    # aspect-ratio heuristic.  0.8 = only override when quite uncertain.
+    FORMAT_CONFIDENCE_THRESHOLD: float = 0.8
 
     def __init__(
         self,
@@ -65,47 +82,110 @@ class PlateOCRModel(nn.Module):
         classification_cfg: dict | None = None,
         lstm_cfg: dict | None = None,
         canvas_height: int = 80,
-        canvas_width: int = 192,
+        canvas_width: int = 256,
         head_hidden: int | None = None,
-        char_aux: bool = False,
+        char_aux: bool | dict = False,
+        film_cfg: dict | None = None,
+        temporal_bridge_cfg: dict | None = None,
     ):
         super().__init__()
         self.plate_config = plate_config
         self.country_list = plate_config.country_list
-        self._country_to_idx = {
-            c: i for i, c in enumerate(self.country_list)
-        }
+        self._country_to_idx = {c: i for i, c in enumerate(self.country_list)}
         self._canvas_height = canvas_height
         self._canvas_width = canvas_width
 
-        self.backbone, stage1_ch, stage2_ch = self._build_backbone(
-            backbone_cfg
-        )
+        self.backbone, stage1_ch, final_ch = self._build_backbone(backbone_cfg)
         self.fusion = MultiScaleFusion(
             stage1_channels=stage1_ch,
-            stage2_channels=stage2_ch,
+            stage2_channels=final_ch,
         )
 
         cc = classification_cfg or {}
-        self.format_head = self._build_format_head(
-            stage2_ch, cc, head_hidden
-        )
+        self.format_head = self._build_format_head(final_ch, cc, head_hidden)
         self.country_head = self._build_country_head(
-            stage2_ch, cc, plate_config, head_hidden
+            final_ch, cc, plate_config, head_hidden
         )
         self.compression = self._build_compression(
-            stage2_ch, canvas_height, canvas_width
+            final_ch, canvas_height, canvas_width
         )
 
         self._init_lstm_and_mask(cc, lstm_cfg, canvas_height, canvas_width)
         self._init_ctc_head(lstm_cfg, head_hidden, plate_config)
+        self._init_char_aux(char_aux, final_ch, plate_config)
+        self._init_film(film_cfg, lstm_cfg, plate_config)
+        self._init_temporal_bridge(temporal_bridge_cfg, lstm_cfg)
 
-        self.char_aux_enabled = char_aux
-        if char_aux:
-            self.char_aux_head = CharAuxHead(
-                in_channels=stage2_ch,
-                max_alphabet_size=plate_config.union_alphabet_size,
-            )
+    def _init_char_aux(
+        self,
+        char_aux: bool | dict,
+        final_ch: int,
+        plate_config: PlateConfig,
+    ) -> None:
+        """Initialize char-auxiliary head if enabled."""
+        ca_cfg: dict = char_aux if isinstance(char_aux, dict) else {}
+        self.char_aux_enabled = (
+            ca_cfg.get("enabled", False)
+            if isinstance(char_aux, dict)
+            else bool(char_aux)
+        )
+        self._enable_char_aux_film = ca_cfg.get("enable_film", False)
+        if not self.char_aux_enabled:
+            self._enable_char_aux_film = False
+            return
+        self.char_aux_head = CharAuxHead(
+            in_channels=final_ch,
+            max_alphabet_size=plate_config.union_alphabet_size,
+            enable_film=self._enable_char_aux_film,
+            num_countries=(
+                plate_config.num_countries
+                if self._enable_char_aux_film
+                else None
+            ),
+            country_emb_dim=ca_cfg.get("country_emb_dim", 128),
+            format_emb_dim=ca_cfg.get("format_emb_dim", 64),
+            hidden_dim=ca_cfg.get("hidden_dim", 1024),
+        )
+
+    def _init_film(
+        self,
+        film_cfg: dict | None,
+        lstm_cfg: dict | None,
+        plate_config: PlateConfig,
+    ) -> None:
+        """Initialize ContextFiLM module if enabled."""
+        fc = film_cfg or {}
+        self._enable_film = fc.get("enable_film", False)
+        if not self._enable_film:
+            self.context_film = None  # type: ignore[assignment]
+            return
+        lc = lstm_cfg or {}
+        lstm_input_size = lc.get("input_size", 256)
+        self.context_film = ContextFiLM(
+            num_countries=plate_config.num_countries,
+            country_emb_dim=fc.get("country_emb_dim", 128),
+            format_emb_dim=fc.get("format_emb_dim", 64),
+            feature_dim=lstm_input_size,
+            hidden_dim=fc.get("hidden_dim", 1024),
+        )
+
+    def _init_temporal_bridge(
+        self,
+        temporal_bridge_cfg: dict | None,
+        lstm_cfg: dict | None,
+    ) -> None:
+        """Initialize TemporalBridge module if enabled."""
+        tbc = temporal_bridge_cfg or {}
+        self._enable_temporal_bridge = tbc.get(
+            "enable_temporal_bridge",
+            False,
+        )
+        if not self._enable_temporal_bridge:
+            self.temporal_bridge = None  # type: ignore[assignment]
+            return
+        lc = lstm_cfg or {}
+        lstm_input_size = lc.get("input_size", 256)
+        self.temporal_bridge = TemporalBridge(channels=lstm_input_size)
 
     @staticmethod
     def _build_format_head(
@@ -115,9 +195,7 @@ class PlateOCRModel(nn.Module):
     ) -> FormatHead:
         """Build format classification head."""
         kwargs = {
-            k: v
-            for k, v in classification_cfg.items()
-            if k in ("dropout",)
+            k: v for k, v in classification_cfg.items() if k in ("dropout",)
         }
         return FormatHead(in_ch, hidden_size=head_hidden, **kwargs)
 
@@ -141,9 +219,7 @@ class PlateOCRModel(nn.Module):
                 dropout=country_cfg.get("dropout", 0.3),
             )
         kwargs = {
-            k: v
-            for k, v in classification_cfg.items()
-            if k in ("dropout",)
+            k: v for k, v in classification_cfg.items() if k in ("dropout",)
         }
         return CountryHead(
             in_ch,
@@ -164,9 +240,7 @@ class PlateOCRModel(nn.Module):
         mask_value = ctc_cfg.get("mask_value", -15.0)
         use_positional = ctc_cfg.get("positional_mask", True)
         max_seq_len = max(canvas_width, canvas_height) // 4 * 2
-        flat_mask = build_mask_table(
-            plate_config, mask_value=mask_value
-        )
+        flat_mask = build_mask_table(plate_config, mask_value=mask_value)
         if use_positional:
             pos_mask = build_positional_mask_table(
                 plate_config,
@@ -174,9 +248,7 @@ class PlateOCRModel(nn.Module):
                 mask_value=mask_value,
             )
         else:
-            pos_mask = flat_mask.unsqueeze(1).expand(
-                -1, max_seq_len, -1
-            )
+            pos_mask = flat_mask.unsqueeze(1).expand(-1, max_seq_len, -1)
         return flat_mask, pos_mask
 
     def _init_lstm_and_mask(
@@ -191,8 +263,9 @@ class PlateOCRModel(nn.Module):
         # Extract positional-encoding params before passing lc to BiLSTM
         lstm_input_size = lc.get("input_size", 256)
         pe_dropout = lc.get("positional_dropout", 0.0)
-        lstm_kwargs = {k: v for k, v in lc.items()
-                       if k not in ("positional_dropout",)}
+        lstm_kwargs = {
+            k: v for k, v in lc.items() if k not in ("positional_dropout",)
+        }
         self.bilstm = PlateBiLSTM(**lstm_kwargs)
 
         # Sinusoidal positional encoding — gives the LSTM an explicit
@@ -353,7 +426,7 @@ class PlateOCRModel(nn.Module):
         max_probs = probs.max(dim=1).values
         ratios = orig_w.float() / orig_h.float().clamp(min=1)
         for i in range(b):
-            if max_probs[i] < 0.8:
+            if max_probs[i] < self.FORMAT_CONFIDENCE_THRESHOLD:
                 # Low confidence → trust aspect ratio
                 if ratios[i] < self.FORMAT_RATIO_THRESHOLD:
                     plate_types[i] = "square"
@@ -390,13 +463,19 @@ class PlateOCRModel(nn.Module):
         """Run compression paths for standard and square samples."""
         if not sq_mask.all():
             std = self.compression.forward_standard(
-                features, orig_h, orig_w, content_mask=content_mask,
+                features,
+                orig_h,
+                orig_w,
+                content_mask=content_mask,
             )
         else:
             std = None
         if sq_mask.any():
             sq = self.compression.forward_square(
-                features, orig_h, orig_w, content_mask=content_mask,
+                features,
+                orig_h,
+                orig_w,
+                content_mask=content_mask,
             )
         else:
             sq = None
@@ -420,8 +499,10 @@ class PlateOCRModel(nn.Module):
             orig_w,
         )
         format_logits = self.format_head(
-            features, content_mask=content_mask,
-            orig_h=orig_h, orig_w=orig_w,
+            features,
+            content_mask=content_mask,
+            orig_h=orig_h,
+            orig_w=orig_w,
         )
         country_logits = self.country_head(features, content_mask)
 
@@ -435,6 +516,8 @@ class PlateOCRModel(nn.Module):
             orig_w=orig_w,
         )
 
+        # Compression needs GT plate types (not scheduled-sampled ones)
+        # to correctly route standard vs square paths during training.
         sample_types = (
             list(gt_plate_types) if gt_plate_types is not None else plate_types
         )
@@ -443,9 +526,25 @@ class PlateOCRModel(nn.Module):
             device=features.device,
         )
         compressed_std, compressed_sq = self._run_compression(
-            features, orig_h, orig_w, content_mask, sq_mask,
+            features,
+            orig_h,
+            orig_w,
+            content_mask,
+            sq_mask,
         )
-        lstm_out = self._run_lstm_paths(compressed_std, compressed_sq, sq_mask)
+        # Derive format indices from resolved plate_types for FiLM
+        format_indices = torch.tensor(
+            [1 if t == "square" else 0 for t in plate_types],
+            device=features.device,
+            dtype=torch.long,
+        )
+        lstm_out = self._run_lstm_paths(
+            compressed_std,
+            compressed_sq,
+            sq_mask,
+            country_idx=country_indices,
+            format_idx=format_indices,
+        )
 
         ramp = self._compute_mask_ramp(epoch)
         T = lstm_out.shape[1]
@@ -453,30 +552,39 @@ class PlateOCRModel(nn.Module):
         # Build effective mask from no-mask / flat / positional tables
         if ramp < 0.0:
             # Warmup: no mask — full union alphabet allowed everywhere
-            effective_mask = self._no_mask_table[
-                country_indices
-            ].unsqueeze(1).expand(-1, T, -1)
+            effective_mask = (
+                self._no_mask_table[country_indices]
+                .unsqueeze(1)
+                .expand(-1, T, -1)
+            )
         elif ramp >= 1.0:
             masks = self._pos_mask_table[country_indices]
             effective_mask = masks[:, :T, :]
         elif ramp <= 0.0:
-            effective_mask = self._flat_mask_table[
-                country_indices
-            ].unsqueeze(1).expand(-1, T, -1)
+            effective_mask = (
+                self._flat_mask_table[country_indices]
+                .unsqueeze(1)
+                .expand(-1, T, -1)
+            )
         else:
-            flat = self._flat_mask_table[
-                country_indices
-            ].unsqueeze(1).expand(-1, T, -1)
-            pos = self._pos_mask_table[
-                country_indices
-           ][:, :T, :]
+            flat = (
+                self._flat_mask_table[country_indices]
+                .unsqueeze(1)
+                .expand(-1, T, -1)
+            )
+            pos = self._pos_mask_table[country_indices][:, :T, :]
             effective_mask = (1.0 - ramp) * flat + ramp * pos
 
         ctc_output = self.ctc_head(lstm_out, effective_mask)
 
         char_aux_logits = None
         if self.char_aux_enabled:
-            char_aux_logits = self.char_aux_head(features, content_mask)
+            char_aux_logits = self.char_aux_head(
+                features,
+                content_mask,
+                country_idx=country_indices,
+                format_idx=format_indices,
+            )
 
         return ModelOutput(
             format_logits=format_logits,
@@ -487,17 +595,38 @@ class PlateOCRModel(nn.Module):
             char_aux_logits=char_aux_logits,
         )
 
+    def _apply_pe_film_bridge(
+        self,
+        x: Tensor,
+        country_idx: Tensor | None,
+        format_idx: Tensor | None,
+    ) -> Tensor:
+        """Apply PE → FiLM → TemporalBridge pipeline before BiLSTM.
+
+        Processing order matters: positional encoding first (gives the
+        LSTM an absolute-position signal), then FiLM modulation
+        conditioned on country/format, then local temporal context
+        via the residual Conv1d bridge.
+        """
+        x = self.pos_encoding(x)
+        if self.context_film is not None:
+            x = self.context_film(x, country_idx, format_idx)
+        if self.temporal_bridge is not None:
+            x = self.temporal_bridge(x)
+        return x
+
     def _run_lstm_paths(
         self,
         compressed_std: Tensor | None,
         compressed_sq: Tensor | None,
         sq_mask: Tensor,
+        country_idx: Tensor | None = None,
+        format_idx: Tensor | None = None,
     ) -> Tensor:
         """Run LSTM on standard and square paths separately.
 
-        Sinusoidal positional encoding is added to each compressed
-        sequence *before* the BiLSTM so the model has an explicit
-        absolute-position signal.
+        Each path applies the same PE → FiLM → TemporalBridge → BiLSTM
+        pipeline; see :meth:`_apply_pe_film_bridge` for details.
         """
         std_mask = ~sq_mask
         lstm_hidden = self.bilstm.hidden_size
@@ -511,14 +640,20 @@ class PlateOCRModel(nn.Module):
         )
         if std_mask.any():
             assert compressed_std is not None
-            pe_std = self.pos_encoding(compressed_std[std_mask])
-            std_lstm = self.bilstm(pe_std)
-            lstm_out[std_mask, : compressed_std.shape[1], :] = std_lstm
+            x = self._apply_pe_film_bridge(
+                compressed_std[std_mask],
+                country_idx[std_mask],
+                format_idx[std_mask],
+            )
+            lstm_out[std_mask, : compressed_std.shape[1], :] = self.bilstm(x)
         if sq_mask.any():
             assert compressed_sq is not None
-            pe_sq = self.pos_encoding(compressed_sq[sq_mask])
-            sq_lstm = self.bilstm(pe_sq)
-            lstm_out[sq_mask] = sq_lstm
+            x = self._apply_pe_film_bridge(
+                compressed_sq[sq_mask],
+                country_idx[sq_mask],
+                format_idx[sq_mask],
+            )
+            lstm_out[sq_mask] = self.bilstm(x)
         return lstm_out
 
     @staticmethod
@@ -536,7 +671,65 @@ class PlateOCRModel(nn.Module):
             return compressed_sq.shape[1], compressed_sq.device
         if compressed_std is not None:
             return compressed_std.shape[1], compressed_std.device
-        return 96, sq_mask.device
+        return _DEFAULT_LSTM_MAX_LEN, sq_mask.device
+
+    def load_state_dict(
+        self,
+        state_dict: dict[str, Tensor],
+        strict: bool = True,
+    ) -> tuple[list[str], list[str]]:
+        """Load state dict with backward-compatible FiLM & bridge handling.
+
+        When ``enable_film=True`` but the checkpoint was saved without
+        FiLM parameters, the missing ``context_film.*`` keys are
+        silently ignored (they are zero-initialised anyway, so the
+        model behaves as identity).  When ``enable_film=False``, any
+        unexpected ``context_film.*`` keys in the checkpoint are
+        dropped.
+
+        The same logic applies to ``temporal_bridge.*`` keys: when
+        ``enable_temporal_bridge=True`` and the checkpoint lacks them,
+        they are ignored (residual connection means untrained bridge is
+        near-identity).  When disabled, bridge keys from the checkpoint
+        are dropped.
+        """
+        state_dict = self._patch_compat_keys(state_dict)
+        return super().load_state_dict(state_dict, strict=strict)
+
+    def _patch_compat_keys(
+        self,
+        state_dict: dict[str, Tensor],
+    ) -> dict[str, Tensor]:
+        """Patch FiLM / TemporalBridge keys for backward compatibility.
+
+        When a module is enabled but checkpoint lacks its keys, inject
+        the model's own default-initialised values so ``strict=True``
+        succeeds (residual connections make untrained modules near-identity).
+
+        When a module is disabled, drop its keys from the checkpoint so
+        they don't appear as unexpected.
+        """
+        model_sd = self.state_dict()
+
+        for prefix, enabled in (
+            ("context_film.", self._enable_film),
+            ("temporal_bridge.", self._enable_temporal_bridge),
+            ("char_aux_head.context_film.", self._enable_char_aux_film),
+        ):
+            if enabled:
+                # Inject defaults for any missing keys
+                for k in model_sd:
+                    if k.startswith(prefix) and k not in state_dict:
+                        state_dict[k] = model_sd[k]
+            else:
+                # Drop module params from checkpoint
+                state_dict = {
+                    k: v
+                    for k, v in state_dict.items()
+                    if not k.startswith(prefix)
+                }
+
+        return state_dict
 
     def encode_countries(
         self,

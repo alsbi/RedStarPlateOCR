@@ -16,11 +16,11 @@ class TestPerSampleCompression:
         self,
         plate_config: PlateConfig,
     ):
-        """Mixed standard+square batch produces (B, 96, C) output."""
+        """Mixed standard+square batch produces (B, 128, C) output."""
         model = PlateOCRModel(plate_config)
-        images = torch.randn(2, 3, 80, 192)
+        images = torch.randn(2, 3, 80, 256)
         orig_h = torch.tensor([80, 80])
-        orig_w = torch.tensor([192, 192])
+        orig_w = torch.tensor([256, 256])
         gt_countries = ["RU", "RU"]
         gt_plate_types = ["standard", "square"]
         result = model(
@@ -31,9 +31,9 @@ class TestPerSampleCompression:
             gt_plate_types=gt_plate_types,
         )
         # ctc_output shape: (B, seq_len, alphabet_size)
-        # seq_len should be 96 (max of standard=48, square=96)
+        # seq_len should be 128 (max of standard=64, square=128)
         assert result.ctc_output.shape[0] == 2
-        assert result.ctc_output.shape[1] == 96
+        assert result.ctc_output.shape[1] == 128
 
     def test_mixed_batch_plate_types_in_output(
         self,
@@ -41,9 +41,9 @@ class TestPerSampleCompression:
     ):
         """ModelOutput.plate_types reflects per-sample types."""
         model = PlateOCRModel(plate_config)
-        images = torch.randn(2, 3, 80, 192)
+        images = torch.randn(2, 3, 80, 256)
         orig_h = torch.tensor([80, 80])
-        orig_w = torch.tensor([192, 192])
+        orig_w = torch.tensor([256, 256])
         gt_countries = ["RU", "RU"]
         gt_plate_types = ["standard", "square"]
         result = model(
@@ -59,11 +59,11 @@ class TestPerSampleCompression:
         self,
         plate_config: PlateConfig,
     ):
-        """All-standard batch produces (B, T, C) with T=48."""
+        """All-standard batch produces (B, T, C) with T=64."""
         model = PlateOCRModel(plate_config)
-        images = torch.randn(2, 3, 80, 192)
+        images = torch.randn(2, 3, 80, 256)
         orig_h = torch.tensor([80, 80])
-        orig_w = torch.tensor([192, 192])
+        orig_w = torch.tensor([256, 256])
         result = model(
             images,
             orig_h,
@@ -71,18 +71,18 @@ class TestPerSampleCompression:
             gt_countries=["RU", "KZ"],
             gt_plate_types=["standard", "standard"],
         )
-        # Standard compression yields T=48
-        assert result.ctc_output.shape[1] == 48
+        # Standard compression yields T=64
+        assert result.ctc_output.shape[1] == 64
 
     def test_all_square_batch_shape(
         self,
         plate_config: PlateConfig,
     ):
-        """All-square batch produces (B, 96, C)."""
+        """All-square batch produces (B, 128, C)."""
         model = PlateOCRModel(plate_config)
-        images = torch.randn(2, 3, 80, 192)
+        images = torch.randn(2, 3, 80, 256)
         orig_h = torch.tensor([80, 80])
-        orig_w = torch.tensor([192, 192])
+        orig_w = torch.tensor([256, 256])
         result = model(
             images,
             orig_h,
@@ -90,7 +90,7 @@ class TestPerSampleCompression:
             gt_countries=["RU", "RU"],
             gt_plate_types=["square", "square"],
         )
-        assert result.ctc_output.shape[1] == 96
+        assert result.ctc_output.shape[1] == 128
 
 
 class TestInferenceFormatPrediction:
@@ -103,9 +103,9 @@ class TestInferenceFormatPrediction:
         """Without gt_plate_types, model uses format_head."""
         model = PlateOCRModel(plate_config)
         model.eval()
-        images = torch.randn(1, 3, 80, 192)
+        images = torch.randn(1, 3, 80, 256)
         orig_h = torch.tensor([80])
-        orig_w = torch.tensor([192])
+        orig_w = torch.tensor([256])
         with torch.no_grad():
             result = model(
                 images,
@@ -128,9 +128,9 @@ class TestInferenceFormatPrediction:
             model.format_head.fc.weight.fill_(0)
             model.format_head.fc.bias.fill_(0)
             model.format_head.fc.bias[1] = 10.0  # square
-        images = torch.randn(1, 3, 80, 192)
+        images = torch.randn(1, 3, 80, 256)
         orig_h = torch.tensor([80])
-        orig_w = torch.tensor([192])
+        orig_w = torch.tensor([256])
         result = model(
             images,
             orig_h,
@@ -149,9 +149,9 @@ class TestInferenceFormatPrediction:
             model.format_head.fc.weight.fill_(0)
             model.format_head.fc.bias.fill_(0)
             model.format_head.fc.bias[0] = 10.0  # standard
-        images = torch.randn(1, 3, 80, 192)
+        images = torch.randn(1, 3, 80, 256)
         orig_h = torch.tensor([80])
-        orig_w = torch.tensor([192])
+        orig_w = torch.tensor([256])
         result = model(
             images,
             orig_h,
@@ -168,11 +168,11 @@ class TestPerSampleInputLengths:
         """Standard sample: input_lengths = col_mask.sum()."""
         comp = AdaptiveCompression(
             canvas_height=80,
-            canvas_width=192,
+            canvas_width=256,
             stride=4,
             in_channels=256,
         )
-        mask = torch.zeros(1, 1, 20, 48)
+        mask = torch.zeros(1, 1, 20, 64)
         mask[0, 0, :, :30] = 1.0
         result = comp.compute_input_lengths(mask, ["standard"])
         assert result[0].item() == 30 + 4  # +4 safety margin
@@ -181,29 +181,29 @@ class TestPerSampleInputLengths:
         """Square sample: input_lengths = feat_w + bot_present."""
         comp = AdaptiveCompression(
             canvas_height=80,
-            canvas_width=192,
+            canvas_width=256,
             stride=4,
             in_channels=256,
         )
-        mask = torch.zeros(1, 1, 20, 48)
+        mask = torch.zeros(1, 1, 20, 64)
         mask[0, 0, :10, :20] = 1.0
         mask[0, 0, 10:, :15] = 1.0
         result = comp.compute_input_lengths(mask, ["square"])
-        # feat_w(48) + bot_present(15) + safety_margin(4) = 67
-        assert result[0].item() == 67
+        # feat_w(64) + bot_present(15) + safety_margin(4) = 83
+        assert result[0].item() == 83
 
     def test_mixed_batch_per_sample_lengths(self):
         """Mixed batch: each sample gets its own input_length."""
         comp = AdaptiveCompression(
             canvas_height=80,
-            canvas_width=192,
+            canvas_width=256,
             stride=4,
             in_channels=256,
         )
-        mask = torch.zeros(2, 1, 20, 48)
+        mask = torch.zeros(2, 1, 20, 64)
         # standard: 30 cols
         mask[0, 0, :, :30] = 1.0
-        # square: top=20, bot=15 => feat_w(48) + bot_present(15) = 63
+        # square: top=20, bot=15 => feat_w(64) + bot_present(15) = 79
         mask[1, 0, :10, :20] = 1.0
         mask[1, 0, 10:, :15] = 1.0
         result = comp.compute_input_lengths(
@@ -211,7 +211,7 @@ class TestPerSampleInputLengths:
             ["standard", "square"],
         )
         assert result[0].item() == 30 + 4  # +4 safety margin
-        assert result[1].item() == 63 + 4  # feat_w + bot_present + margin
+        assert result[1].item() == 83  # feat_w + bot_present + margin
 
 
 class TestGradientFlow:
@@ -223,9 +223,9 @@ class TestGradientFlow:
     ):
         """Gradient flows to both compression paths in mixed batch."""
         model = PlateOCRModel(plate_config)
-        images = torch.randn(2, 3, 80, 192)
+        images = torch.randn(2, 3, 80, 256)
         orig_h = torch.tensor([80, 80])
-        orig_w = torch.tensor([192, 192])
+        orig_w = torch.tensor([256, 256])
         result = model(
             images,
             orig_h,
@@ -249,12 +249,12 @@ class TestPerSampleInputLengthsExtra:
         """train_epoch uses gt_plate_types (not majority vote)."""
         comp = AdaptiveCompression(
             canvas_height=80,
-            canvas_width=192,
+            canvas_width=256,
             stride=4,
             in_channels=256,
         )
         # Simulate a mixed batch: 2 standard, 1 square
-        mask = torch.zeros(3, 1, 20, 48)
+        mask = torch.zeros(3, 1, 20, 64)
         mask[0, 0, :, :30] = 1.0  # standard
         mask[1, 0, :, :25] = 1.0  # standard
         mask[2, 0, :10, :20] = 1.0  # square top
@@ -263,4 +263,4 @@ class TestPerSampleInputLengthsExtra:
         result = comp.compute_input_lengths(mask, gt_plate_types)
         assert result[0].item() == 30 + 4  # +4 safety margin
         assert result[1].item() == 25 + 4  # +4 safety margin
-        assert result[2].item() == 63 + 4  # feat_w + bot_present + margin
+        assert result[2].item() == 83  # feat_w + bot_present + margin

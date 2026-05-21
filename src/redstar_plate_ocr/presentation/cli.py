@@ -83,6 +83,11 @@ def train(
         help="Probability of including original (non-augmented) "
         "images in training batches (0.0-1.0)",
     ),
+    enable_warmup: bool | None = typer.Option(
+        None,
+        "--enable-warmup/--no-enable-warmup",
+        help="Override adaptive warmup setting from config",
+    ),
 ) -> None:
     """Start training."""
 
@@ -97,16 +102,20 @@ def train(
         cfg["training"] = {}
     cfg["training"]["original_prob"] = original_prob
 
+    # CLI override for enable_warmup (only when explicitly set)
+    if enable_warmup is not None:
+        if "augmentation" not in cfg:
+            cfg["augmentation"] = {}
+        if "warmup" not in cfg["augmentation"]:
+            cfg["augmentation"]["warmup"] = {}
+        cfg["augmentation"]["warmup"]["enable_warmup"] = enable_warmup
+
     out = Path(output_dir)
     setup_logging(verbose=_verbose_count)
 
-    train_counts, val_counts = _validate_train_val(
-        plate_config, data_dir
-    )
+    train_counts, val_counts = _validate_train_val(plate_config, data_dir)
 
-    model = PlateOCRModel(
-        plate_config=pc, **_model_kwargs_from_cfg(cfg)
-    )
+    model = PlateOCRModel(plate_config=pc, **_model_kwargs_from_cfg(cfg))
     ckpt_state = _load_checkpoint(model, pc, checkpoint)
 
     if ckpt_state is not None:
@@ -344,7 +353,10 @@ def export(
             total=None,
         )
         exporter.export_onnx(
-            model, output, plate_config=_pc, preprocessing=preprocessing,
+            model,
+            output,
+            plate_config=_pc,
+            preprocessing=preprocessing,
         )
         progress.update(task, completed=True)
     console.print(f"[green]✓ Exported to {output}[/green]")
@@ -538,6 +550,12 @@ def _apply_resume_state(
     if scaler_state is not None:
         trainer.scaler.load_state_dict(scaler_state)
 
+    # Restore severe augmentation scheduler state if present
+    if trainer.severe_scheduler is not None:
+        sched_state = ckpt_state.get("severe_scheduler")
+        if sched_state is not None:
+            trainer.severe_scheduler.load_state_dict(sched_state)
+
 
 def _load_model_config(
     config: str,
@@ -582,9 +600,7 @@ def _validate_checkpoint_compat(
         for w in warns:
             console.print(f"[yellow]⚠ {w}[/yellow]")
     except ValueError as e:
-        console.print(
-            f"[bold red]Checkpoint incompatible:[/bold red] {e}"
-        )
+        console.print(f"[bold red]Checkpoint incompatible:[/bold red] {e}")
         raise typer.Exit(code=1)
 
 
