@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import logging
+import subprocess
+import threading
 import webbrowser
+from queue import Empty, Full, Queue
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -18,10 +21,10 @@ except ImportError:
 
 
 class DashboardLauncher:
-    """Launches TrackIO dashboard as a background process.
+    """Launches TrackIO dashboard as a subprocess.
 
-    Uses ``trackio.show()`` with ``block_thread=False`` so the
-    dashboard runs in a separate thread while training continues.
+    Uses subprocess instead of in-process thread to avoid
+    SQLite/GIL contention with the training loop.
     """
 
     def __init__(
@@ -33,39 +36,45 @@ class DashboardLauncher:
         self._project = project
         self._port = port
         self._open_browser = open_browser
-        self._app: object | None = None
+        self._process: subprocess.Popen | None = None
         self._url: str | None = None
 
     def start(self) -> None:
-        """Start the dashboard server in background."""
+        """Start the dashboard server as a subprocess."""
         if not _trackio_available:
             logger.warning("TrackIO not installed — cannot launch dashboard")
             return
 
+        import sys
+
+        cmd = [
+            sys.executable,
+            "-m",
+            "trackio",
+            "show",
+            "--project",
+            self._project,
+        ]
+        if self._port is not None:
+            cmd.extend(["--server-port", str(self._port)])
+
         try:
-            import trackio
+            self._process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            port = self._port or 7860
+            self._url = f"http://localhost:{port}"
+            logger.info("TrackIO dashboard started at %s", self._url)
 
-            kwargs: dict[str, Any] = {
-                "project": self._project,
-                "open_browser": False,
-                "block_thread": False,
-            }
-            if self._port is not None:
-                kwargs["server_port"] = self._port
-
-            app, url, _share_url, _full_url = trackio.show(**kwargs)
-            self._app = app
-            self._url = url
-            logger.info("TrackIO dashboard started at %s", url)
-
-            if self._open_browser and url:
-                import threading
+            if self._open_browser and self._url:
 
                 def _open() -> None:
                     import time
 
-                    time.sleep(3)
-                    webbrowser.open(url)
+                    time.sleep(4)
+                    webbrowser.open(self._url)  # type: ignore[arg-type]
 
                 threading.Thread(target=_open, daemon=True).start()
         except Exception as e:
@@ -73,17 +82,14 @@ class DashboardLauncher:
 
     def stop(self) -> None:
         """Stop the dashboard server."""
-        if self._app is not None:
+        if self._process is not None:
+            self._process.terminate()
             try:
-                # trackio show returns an app with .close()
-                close = getattr(self._app, "close", None)
-                if callable(close):
-                    close()
-                    logger.info("TrackIO dashboard stopped")
-            except Exception as e:
-                logger.warning("Error stopping TrackIO dashboard: %s", e)
-            finally:
-                self._app = None
+                self._process.wait(timeout=5)
+            except Exception:
+                self._process.kill()
+            self._process = None
+            logger.info("TrackIO dashboard stopped")
 
     @property
     def url(self) -> str | None:
@@ -92,7 +98,18 @@ class DashboardLauncher:
 
 
 class MetricsTracker:
-    """Lightweight wrapper around TrackIO with graceful fallback."""
+    """Lightweight wrapper around TrackIO with graceful fallback.
+
+    Key design decisions for non-blocking operation:
+
+    - Uses ``embed=False`` and ``auto_log_gpu=False`` in
+      ``trackio.init()`` to prevent background threads that compete
+      for SQLite locks.
+    - Uses an async queue + background writer thread so that
+      ``trackio.log()`` never blocks the training loop.
+    """
+
+    _QUEUE_MAX_SIZE = 1024
 
     def __init__(
         self,
@@ -104,6 +121,9 @@ class MetricsTracker:
         self.enabled = enabled and _trackio_available
         self._project = project
         self._name = name
+        self._queue: Queue[tuple[dict[str, float], int | None]] | None = None
+        self._writer_thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
 
         if not enabled:
             logger.info("TrackIO disabled by configuration")
@@ -119,19 +139,61 @@ class MetricsTracker:
         if project and name:
             import trackio
 
-            trackio.init(project=project, name=name, config=config or {})
+            # CRITICAL: embed=False prevents auto-dashboard launch;
+            # auto_log_gpu=False prevents background GPU logging thread.
+            # Both avoid SQLite contention that causes hangs on
+            # Apple Silicon.
+            trackio.init(
+                project=project,
+                name=name,
+                config=config or {},
+                embed=False,
+                auto_log_gpu=False,
+            )
             logger.info(
                 "TrackIO initialized: project=%s, name=%s",
                 project,
                 name,
             )
 
+            # Start async writer thread
+            self._queue = Queue(maxsize=self._QUEUE_MAX_SIZE)
+            self._writer_thread = threading.Thread(
+                target=self._writer_loop,
+                daemon=True,
+                name="trackio-writer",
+            )
+            self._writer_thread.start()
+
+    def _writer_loop(self) -> None:
+        """Background thread that drains the metrics queue."""
+        assert self._queue is not None
+        import trackio
+
+        while not self._stop_event.is_set():
+            try:
+                metrics, step = self._queue.get(timeout=1.0)
+            except Empty:
+                continue
+            try:
+                trackio.log(metrics, step=step)
+            except Exception as e:
+                logger.warning("TrackIO log error: %s", e)
+
+        # Drain remaining items after stop signal
+        while not self._queue.empty():
+            try:
+                metrics, step = self._queue.get_nowait()
+                trackio.log(metrics, step=step)
+            except Exception:
+                break
+
     def log(
         self,
         metrics: dict[str, float],
         step: int | None = None,
     ) -> None:
-        """Log metrics dict."""
+        """Log metrics dict (non-blocking via queue)."""
         if not self.enabled:
             parts = [
                 f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
@@ -140,16 +202,21 @@ class MetricsTracker:
             logger.info(f"[metrics step={step}] {', '.join(parts)}")
             return
 
-        import trackio
-
-        trackio.log(metrics, step=step)
+        if self._queue is not None:
+            try:
+                self._queue.put_nowait((metrics, step))
+            except Full:
+                logger.warning(
+                    "TrackIO queue full — dropping metrics step=%s",
+                    step,
+                )
 
     def log_images(
         self,
         images: dict[str, Any],
         step: int | None = None,
     ) -> None:
-        """Log images for visual debugging."""
+        """Log images for visual debugging (direct call, rare)."""
         if not self.enabled:
             return
 
@@ -161,6 +228,13 @@ class MetricsTracker:
         """Finish tracking session."""
         if not self.enabled:
             return
+
+        # Signal writer thread to stop and wait for drain
+        if self._stop_event is not None:
+            self._stop_event.set()
+        if self._writer_thread is not None:
+            self._writer_thread.join(timeout=5.0)
+
         try:
             import trackio
 
