@@ -297,16 +297,30 @@ class TestOnnxExportInvertedResidual:
         """Export backbone with InvertedResidualBlock to ONNX."""
         pytest.importorskip("onnxscript")
         onnx = pytest.importorskip("onnx")
-        small_model.eval()
+
+        # JIT tracing cannot handle custom dataclass outputs.
+        # Wrap the backbone so forward() returns a plain tuple.
+        class _TupleBackbone(torch.nn.Module):
+            def __init__(self, backbone: PlateBackbone) -> None:
+                super().__init__()
+                self.backbone = backbone
+
+            def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
+                out = self.backbone(x)
+                return out.stage1, out.final
+
+        wrapper = _TupleBackbone(small_model)
+        wrapper.eval()
         dummy = torch.randn(1, 3, 80, 256)
         with tempfile.NamedTemporaryFile(suffix=".onnx") as f:
             torch.onnx.export(
-                small_model,
+                wrapper,
                 dummy,
                 f.name,
-                opset_version=11,
+                opset_version=17,
                 input_names=["input"],
                 output_names=["stage1", "final"],
+                dynamo=False,
             )
             model = onnx.load(f.name)
             onnx.checker.check_model(model)
@@ -319,19 +333,30 @@ class TestOnnxExportInvertedResidual:
         rt = pytest.importorskip("onnxruntime")
         import numpy as np
 
-        small_model.eval()
+        class _TupleBackbone(torch.nn.Module):
+            def __init__(self, backbone: PlateBackbone) -> None:
+                super().__init__()
+                self.backbone = backbone
+
+            def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
+                out = self.backbone(x)
+                return out.stage1, out.final
+
+        wrapper = _TupleBackbone(small_model)
+        wrapper.eval()
         dummy = torch.randn(1, 3, 80, 256)
         with torch.no_grad():
-            pt_out = small_model(dummy)
+            pt_out = wrapper(dummy)
 
         with tempfile.NamedTemporaryFile(suffix=".onnx") as f:
             torch.onnx.export(
-                small_model,
+                wrapper,
                 dummy,
                 f.name,
-                opset_version=11,
+                opset_version=17,
                 input_names=["input"],
                 output_names=["stage1", "final"],
+                dynamo=False,
             )
             sess = rt.InferenceSession(
                 f.name, providers=["CPUExecutionProvider"]
@@ -340,7 +365,7 @@ class TestOnnxExportInvertedResidual:
 
         # final output (index 1)
         np.testing.assert_allclose(
-            pt_out.final.numpy(),
+            pt_out[1].numpy(),
             ort_out[1],
             atol=1e-4,
             rtol=1e-3,
