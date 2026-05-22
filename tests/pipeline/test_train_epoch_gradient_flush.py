@@ -1,11 +1,13 @@
 """Tests for gradient force-flush behaviour in _optimizer_step.
 
-Validates two critical scenarios:
+Validates critical scenarios:
 1. When gradient_accumulation_steps > number_of_batches,
    optimizer.step() IS called via the force flush at epoch end.
 2. When gradient_accumulation_steps == number_of_batches,
    the natural accumulation step fires and the subsequent
-   force flush also executes (behaviour unchanged).
+   force flush is SKIPPED (no phantom step on zero grads).
+3. When batches % accum != 0, remaining gradients are flushed.
+4. When batches % accum == 0, no redundant flush occurs.
 """
 
 from __future__ import annotations
@@ -129,79 +131,40 @@ class TestGradientFlushAccumExceedsBatches:
     "redstar_plate_ocr.pipeline.train_epoch.torch.nn.utils.clip_grad_norm_",
     return_value=torch.tensor(0.0),
 )
-class TestGradientFlushAccumEqualsBatches:
-    """When gradient_accumulation_steps == num_batches, behaviour unchanged."""
+class TestGradientFlushNoPhantomStep:
+    """When accum divides batches exactly, force flush must NOT fire.
 
-    def test_natural_accumulation_fires_on_last_batch(
+    This prevents phantom optimizer steps on zero/None gradients that
+    would corrupt Adam momentum and inflate global_step / LR schedule.
+    """
+
+    def test_no_force_flush_when_exact_alignment(
         self,
         mock_clip: MagicMock,
     ) -> None:
-        """Natural accumulation step fires exactly on the last batch."""
+        """accum=4, 4 batches → natural step on batch 3; force does nothing."""
         trainer = _make_trainer_mock(gradient_accumulation_steps=4)
-        did_step_flags: list[bool] = []
 
         step = 0
+        did_step_flags: list[bool] = []
         for _ in range(4):
             step, did_step, _ = _optimizer_step(trainer, step)
             did_step_flags.append(did_step)
 
-        # Only the 4th batch triggers the natural accumulation step
+        # Natural accumulation step fired once at batch index 3
         assert did_step_flags == [False, False, False, True]
         assert trainer.optimizer.step.call_count == 1
-        assert trainer.country_optimizer.step.call_count == 1
 
-    def test_force_flush_still_fires_after_exact_alignment(
-        self,
-        mock_clip: MagicMock,
-    ) -> None:
-        """Force flush fires once more after natural alignment."""
-        trainer = _make_trainer_mock(gradient_accumulation_steps=4)
-
-        step = 0
-        for _ in range(4):
-            step, _, _ = _optimizer_step(trainer, step)
-
+        # Force flush should NOT add another step — all grads already consumed
         step, did_step, _ = _optimizer_step(trainer, step, force=True)
+        assert not did_step
+        assert trainer.optimizer.step.call_count == 1  # unchanged
 
-        # Natural step (1) + force flush (1) = 2 total
-        assert did_step
-        assert trainer.optimizer.step.call_count == 2
-        assert trainer.country_optimizer.step.call_count == 2
-
-    def test_total_steps_equals_natural_plus_force(
+    def test_no_force_flush_when_accum_divides_batches_evenly(
         self,
         mock_clip: MagicMock,
     ) -> None:
-        """Total optimizer.step() calls = natural steps + force flush."""
-        trainer = _make_trainer_mock(gradient_accumulation_steps=2)
-        num_batches = 2
-
-        step = 0
-        for _ in range(num_batches):
-            step, _, _ = _optimizer_step(trainer, step)
-
-        # Natural step should have fired once (at batch index 1)
-        natural_calls = trainer.optimizer.step.call_count
-        assert natural_calls == 1
-
-        _optimizer_step(trainer, step, force=True)
-
-        total_calls = trainer.optimizer.step.call_count
-        assert total_calls == natural_calls + 1
-
-
-@patch(
-    "redstar_plate_ocr.pipeline.train_epoch.torch.nn.utils.clip_grad_norm_",
-    return_value=torch.tensor(0.0),
-)
-class TestGradientFlushAccumDividesBatchesEvenly:
-    """When batches divide evenly by accum, multiple steps fire."""
-
-    def test_multiple_natural_steps_plus_force_flush(
-        self,
-        mock_clip: MagicMock,
-    ) -> None:
-        """6 batches with accum=2 → 3 natural steps + 1 force flush."""
+        """accum=2, 6 batches → 3 natural steps; force adds nothing."""
         trainer = _make_trainer_mock(gradient_accumulation_steps=2)
 
         step = 0
@@ -211,10 +174,35 @@ class TestGradientFlushAccumDividesBatchesEvenly:
         natural_calls = trainer.optimizer.step.call_count
         assert natural_calls == 3  # at batch indices 1, 3, 5
 
-        _optimizer_step(trainer, step, force=True)
+        step, did_step, _ = _optimizer_step(trainer, step, force=True)
+        assert not did_step
+        assert trainer.optimizer.step.call_count == 3  # unchanged
 
-        total_calls = trainer.optimizer.step.call_count
-        assert total_calls == 4  # 3 natural + 1 force
+
+@patch(
+    "redstar_plate_ocr.pipeline.train_epoch.torch.nn.utils.clip_grad_norm_",
+    return_value=torch.tensor(0.0),
+)
+class TestGradientFlushPartialRemainder:
+    """When batches don't divide evenly by accum, remainder gets flushed."""
+
+    def test_remainder_flushed_with_force(
+        self,
+        mock_clip: MagicMock,
+    ) -> None:
+        """accum=2, 5 batches → 2 natural + 1 force flush for last batch."""
+        trainer = _make_trainer_mock(gradient_accumulation_steps=2)
+
+        step = 0
+        for _ in range(5):
+            step, _, _ = _optimizer_step(trainer, step)
+
+        natural_calls = trainer.optimizer.step.call_count
+        assert natural_calls == 2  # at batch indices 1, 3
+
+        step, did_step, _ = _optimizer_step(trainer, step, force=True)
+        assert did_step
+        assert trainer.optimizer.step.call_count == 3  # 2 + 1 flush
 
 
 @patch(
@@ -241,3 +229,14 @@ class TestGradientNormReturned:
         # combined norm = sqrt(0^2 + 0^2) = 0.0
         assert isinstance(grad_norm, float)
         assert grad_norm >= 0.0
+
+    def test_no_step_returns_zero_grad_norm(
+        self,
+        mock_clip: MagicMock,
+    ) -> None:
+        """When no step is taken, grad_norm returns 0.0."""
+        trainer = _make_trainer_mock(gradient_accumulation_steps=10)
+
+        step, did_step, grad_norm = _optimizer_step(trainer, 0)
+        assert not did_step
+        assert grad_norm == 0.0

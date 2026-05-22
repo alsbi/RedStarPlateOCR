@@ -132,7 +132,7 @@ training:
   log_grad_interval: 100
 
 tracking:
-  enabled: false
+  enabled: true
   project: redstar-plate-ocr
   # name: auto-generated from timestamp if not set
 
