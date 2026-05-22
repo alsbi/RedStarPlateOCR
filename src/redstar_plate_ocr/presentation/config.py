@@ -35,6 +35,7 @@ _BACKBONE_KEYS = frozenset(
         "stage2_mlp_ratio",
         "stage3_mlp_ratio",
         "stage3_norm",
+        "gradient_checkpointing",
     }
 )
 _LSTM_KEYS = frozenset(

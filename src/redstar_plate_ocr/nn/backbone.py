@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.utils.checkpoint import checkpoint
 
 
 def _get_activation(name: str) -> nn.Module:
@@ -248,9 +249,11 @@ class PlateBackbone(nn.Module):
         stage2_mlp_ratio: int = 1,
         stage3_mlp_ratio: int = 1,
         stage3_norm: str = "batch",
+        gradient_checkpointing: bool = False,
     ):
         super().__init__()
         self._final_channels = stage3_channels or stage2_channels
+        self._gradient_checkpointing = gradient_checkpointing
         self.stem = self._build_stem(stem_channels, activation)
         self._stem_to_stage1 = self._build_stem_to_stage1(
             stem_channels, stage1_channels, activation
@@ -438,12 +441,19 @@ class PlateBackbone(nn.Module):
             return [drop_path_rate]
         return []
 
-    def forward(self, x: Tensor) -> BackboneOutput:
-        x = self.stem(x)
-        stage1_out = self.stage1(self._stem_to_stage1(x))
-        x = self.down(stage1_out)
+    def _run_stages23(self, x: Tensor) -> Tensor:
         x = self.stage2(x)
         if self.expand_stage3 is not None:
             x = self.expand_stage3(x)
         x = self.stage3(x)
+        return x
+
+    def forward(self, x: Tensor) -> BackboneOutput:
+        x = self.stem(x)
+        stage1_out = self.stage1(self._stem_to_stage1(x))
+        x = self.down(stage1_out)
+        if self._gradient_checkpointing and self.training:
+            x = checkpoint(self._run_stages23, x, use_reentrant=False)
+        else:
+            x = self._run_stages23(x)
         return BackboneOutput(stage1=stage1_out, final=x)

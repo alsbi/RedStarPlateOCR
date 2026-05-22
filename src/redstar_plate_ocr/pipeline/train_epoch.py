@@ -141,6 +141,7 @@ def _backward_step(
 def _optimizer_step(
     trainer: Trainer,
     step: int,
+    force: bool = False,
 ) -> tuple[int, bool, float]:
     """Gradient accumulation and optimizer step.
 
@@ -148,7 +149,7 @@ def _optimizer_step(
     and combined gradient norm (0.0 if no step).
     """
     config = trainer.config
-    if (step + 1) % config.gradient_accumulation_steps != 0:
+    if not force and (step + 1) % config.gradient_accumulation_steps != 0:
         return step + 1, False, 0.0
 
     grad_clip = config.gradient_clip
@@ -581,6 +582,21 @@ def run_train_epoch(
             break
 
     running["avg_batch_ms"] = avg_batch_ms
+
+    # Flush any remaining accumulated gradients at end of epoch
+    step, did_step, grad_norm = _optimizer_step(trainer, step, force=True)
+    if did_step and tracker is not None:
+        global_step += 1
+        _log_tracker_step(
+            tracker,
+            global_step,
+            log_interval,
+            log_grad_interval,
+            running,
+            trainer.optimizer.param_groups[0]["lr"],
+            grad_norm,
+        )
+
     _compute_final_accuracies(
         running,
         running_fmt_acc,
