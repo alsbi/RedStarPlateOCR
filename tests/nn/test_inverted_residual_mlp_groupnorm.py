@@ -6,6 +6,7 @@ import tempfile
 
 import pytest
 import torch
+from torch import Tensor
 
 from redstar_plate_ocr.nn.backbone import (
     DWSepBlock,

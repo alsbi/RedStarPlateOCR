@@ -221,17 +221,17 @@ def test_format_epoch_stats_shows_compact_metrics():
         1.5,
     )
     assert "loss=1.5000" in result
-    assert "plate=85.000%" in result
+    assert "plate=85.0%" in result
     assert "cer=0.1230" in result
-    assert "char=88.000%" in result
+    assert "char=88.0%" in result
     # First epoch → no arrows
     assert "↑" not in result
     assert "↓" not in result
     # region and fmt are shown; std and sq are shown
-    assert "region=92.000%" in result
-    assert "fmt=78.000%" in result
-    assert "std=0.000%" in result
-    assert "sq=60.000%" in result
+    assert "region=92.0%" in result
+    assert "fmt=78.0%" in result
+    assert "std=0.0%" in result
+    assert "sq=60.0%" in result
 
 
 def test_format_epoch_stats_improvement_shows_arrows():
@@ -254,7 +254,7 @@ def test_format_epoch_stats_improvement_shows_arrows():
         best_metrics,
         2.0,
     )
-    assert "plate=90.000%↑" in result
+    assert "plate=90.0%↑" in result
     assert "cer=0.0500↓" in result
 
 

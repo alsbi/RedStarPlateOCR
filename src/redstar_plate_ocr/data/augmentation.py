@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import random
-from typing import Any
 from collections.abc import Callable
+from typing import Any
 
 import albumentations as A
 import cv2

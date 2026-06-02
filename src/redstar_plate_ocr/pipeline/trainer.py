@@ -186,6 +186,7 @@ class Trainer:
         self.enhancement_cfg = preproc.get("smart_enhancement", None)
 
         self._interrupt_requested: bool = False
+        self._force_stop: bool = False
         self._save_thread: threading.Thread | None = None
         self.start_epoch: int = 0
 
@@ -524,9 +525,22 @@ class Trainer:
         )
 
     def _handle_interrupt(self, signum: int, frame: object) -> None:
-        """Handle SIGINT: first call sets flag, second raises."""
-        if self._interrupt_requested:
+        """Handle SIGINT: first call → graceful stop, second → force stop."""
+        if self._force_stop:
+            # Third Ctrl+C: last resort — raise to break out of stuck I/O
             raise KeyboardInterrupt
+        if self._interrupt_requested:
+            # Second Ctrl+C: force stop (skip validation & gradient flush)
+            self._force_stop = True
+            logger.info("Force stop requested...")
+            try:
+                Console().print(
+                    "[bold red]⏹ Force stop — exiting immediately.[/bold red]"
+                )
+            except Exception:
+                pass
+            return
+        # First Ctrl+C: graceful stop after current batch
         self._interrupt_requested = True
         logger.info("Interrupt requested, finishing current batch...")
         try:
@@ -618,6 +632,7 @@ class Trainer:
     def train(self) -> dict:
         """Run training loop, return best metrics."""
         self._interrupt_requested = False
+        self._force_stop = False
         run_dir = create_run_dir(self.output_dir)
         self.run_dir = run_dir
         logger.info("Run directory: %s", run_dir)
@@ -655,6 +670,8 @@ class Trainer:
         self._log_training_config()
         signal.signal(signal.SIGINT, self._handle_interrupt)
 
+        best_metrics: dict[str, float] = {}
+        last_metrics: dict[str, float] = {}
         try:
             best_metrics, last_metrics = self._run_main_training()
             if best_metrics:
@@ -663,6 +680,22 @@ class Trainer:
                     best_metrics.get("val_plate_accuracy", 0.0),
                     best_metrics.get("val_cer", 0.0),
                 )
+        except KeyboardInterrupt:
+            # Third Ctrl+C — still try to save what we have
+            logger.info("Training interrupted by user (forced).")
+            try:
+                last_epoch = max(self.start_epoch - 1, 0)
+                # Use real best_metric if available; avoid overwriting a
+                # previously-saved checkpoint with a dummy -1.0 value.
+                saved_best = getattr(self, "_best_metrics", None)
+                bm = (
+                    saved_best.get("val_plate_accuracy", -1.0)
+                    if saved_best
+                    else -1.0
+                )
+                self._save_interrupted_checkpoint(last_epoch, bm)
+            except Exception:
+                pass
         finally:
             self.tracker.finish()
             if self._dashboard is not None:
@@ -677,6 +710,12 @@ class Trainer:
 
         if self._save_thread is not None:
             self._save_thread.join()
+
+        if self._interrupt_requested or self._force_stop:
+            Console().print(
+                "[bold green]⏹ Training stopped cleanly.[/bold green]"
+            )
+
         return {"best": best_metrics, "last": last_metrics}
 
     def _compute_aug_phase(self, epoch: int) -> str:
@@ -839,6 +878,11 @@ class Trainer:
         with progress_display:
             epoch_times: list[float] = []
             for epoch in range(self.start_epoch, self.config.epochs):
+                if self._force_stop:
+                    # Force stop from previous epoch — still save what we have
+                    self._save_interrupted_checkpoint(epoch - 1, best_metric)
+                    progress_display.show_stopping(force=True)
+                    break
                 train_loader, _loader_phase = self._resolve_train_loader(
                     epoch,
                     train_loader,
@@ -863,6 +907,9 @@ class Trainer:
                 self._maybe_empty_cache()
 
                 if self._should_stop_epoch(result, epoch, best_metric):
+                    progress_display.show_stopping(
+                        force=self._force_stop,
+                    )
                     break
 
         return best_metrics, last_metrics

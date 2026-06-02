@@ -140,12 +140,12 @@ def test_format_epoch_stats_train_acc_not_in_progressbar():
     assert "tr_plate" not in result
     assert "tr_fmt" not in result
     assert "tr_ctry" not in result
-    assert "plate=80.000%" in result
+    assert "plate=80.0%" in result
     assert "cer=0.1000" in result
 
 
 def test_format_epoch_stats_compact_format():
-    """Compact format: .3% for plate/char, includes std/sq."""
+    """Compact format: .1% for plate/char, includes std/sq."""
     val = {
         "val_plate_accuracy": 0.856,
         "val_cer": 0.12,
@@ -156,12 +156,12 @@ def test_format_epoch_stats_compact_format():
         "val_square_accuracy": 0.4,
     }
     result = format_epoch_stats(val, {}, 1.5)
-    assert "plate=85.600%" in result
-    assert "char=93.400%" in result
-    assert "region=70.000%" in result
-    assert "fmt=60.000%" in result
-    assert "std=50.000%" in result
-    assert "sq=40.000%" in result
+    assert "plate=85.6%" in result
+    assert "char=93.4%" in result
+    assert "region=70.0%" in result
+    assert "fmt=60.0%" in result
+    assert "std=50.0%" in result
+    assert "sq=40.0%" in result
 
 
 def test_format_epoch_stats_arrows_not_on_first_epoch():

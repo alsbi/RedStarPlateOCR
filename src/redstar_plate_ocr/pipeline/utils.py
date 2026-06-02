@@ -133,13 +133,13 @@ def _format_section_1(
 ) -> str:
     """Format core metrics section."""
     return (
-        f"plate={plate:.3%}{plate_tag}{cache_tag} "
+        f"🎯  plate={plate:.1%}{plate_tag}{cache_tag} "
         f"cer={cer:.4f}{cer_tag} "
-        f"char={char:.3%} "
-        f"region={country:.3%} "
-        f"fmt={fmt:.3%} "
-        f"std={std:.3%} "
-        f"sq={sq:.3%}"
+        f"char={char:.1%} "
+        f"region={country:.1%} "
+        f"fmt={fmt:.1%} "
+        f"std={std:.1%} "
+        f"sq={sq:.1%}"
     )
 
 
@@ -148,9 +148,9 @@ def _format_sys(
     epoch_duration: float,
 ) -> str:
     """Format system section (loss + duration)."""
-    parts = [f"loss={train_loss:.4f}"]
+    parts = [f"📉  loss={train_loss:.4f}"]
     if epoch_duration > 0:
-        parts.append(format_duration(epoch_duration))
+        parts.append(f"⏱  {format_duration(epoch_duration)}")
     return " ".join(parts)
 
 
@@ -236,14 +236,25 @@ def format_train_epoch_stats(
     return f"{core} │ {sys_str}"
 
 
+def _country_flag(code: str) -> str:
+    """Convert 2-letter country code to flag emoji (e.g. 'BY' → '🇧🇾')."""
+    if len(code) != 2:
+        return code
+    base = ord("\U0001f1e6") - ord("A")  # Regional indicator A = 🇦
+    ch0 = chr(base + ord(code[0].upper()))
+    ch1 = chr(base + ord(code[1].upper()))
+    return f"{ch0}{ch1} "
+
+
 def _format_per_country(val_metrics: dict[str, float]) -> str:
-    """Format per-country plate accuracy: BY=98.2% GE=72.7% ..."""
+    """Format per-country plate accuracy: 🇧🇾 98.2% 🇬🇪 72.7% ..."""
     parts: list[str] = []
     for key in sorted(val_metrics):
         if key.startswith("val_region_"):
             country = key[len("val_region_") :]
             acc = val_metrics[key]
-            parts.append(f"{country}={acc:.3%}")
+            flag = _country_flag(country)
+            parts.append(f"{flag}{acc:.1%}")
     return " ".join(parts)
 
 

@@ -236,6 +236,9 @@ def _format_batch_stats(
     plate_acc: float,
     char_acc: float,
     avg_batch_ms: float = 0.0,
+    grad_norm: float = 0.0,
+    accum_step: int = 0,
+    accum_total: int = 1,
 ) -> str:
     """Format progress-bar stats string."""
     left = (
@@ -245,7 +248,14 @@ def _format_batch_stats(
         f"region={ctry_acc:.3%} "
         f"fmt={fmt_acc:.3%}"
     )
-    right = f"{avg_batch_ms:.0f}ms"
+    # Right section: grad norm + accum + timing
+    right_parts: list[str] = []
+    if grad_norm > 0.0:
+        right_parts.append(f"📏  {grad_norm:.2f}")
+    if accum_total > 1:
+        right_parts.append(f"📦  {accum_step}/{accum_total}")
+    right_parts.append(f"⏱  {avg_batch_ms:.0f}ms")
+    right = " ".join(right_parts)
     return f"{left} │ {right}"
 
 
@@ -277,6 +287,9 @@ def _update_progress(
     running_plate_acc: list[float],
     running_char_acc: list[float],
     input_lengths: torch.Tensor | None = None,
+    grad_norm: float = 0.0,
+    accum_step: int = 0,
+    accum_total: int = 1,
 ) -> None:
     """Compute batch accuracy and update progress display."""
     with torch.no_grad():
@@ -300,6 +313,9 @@ def _update_progress(
         plate_acc,
         char_acc,
         avg_batch_ms=avg_batch_ms,
+        grad_norm=grad_norm,
+        accum_step=accum_step,
+        accum_total=accum_total,
     )
     best = getattr(trainer, "_best_metrics", None)
     epoch_summary = format_train_epoch_stats(
@@ -490,6 +506,8 @@ def run_train_epoch(
     running_plate_acc: list[float] = []
     running_char_acc: list[float] = []
     avg_batch_ms: float = 0.0
+    last_grad_norm: float = 0.0
+    accum_steps = trainer.config.gradient_accumulation_steps
 
     # Apply char_aux ramp schedule if configured
     cfg = trainer.config
@@ -531,6 +549,8 @@ def run_train_epoch(
         avg_batch_ms = _compute_avg_batch_ms(epoch_start, batch_idx)
 
         step, did_step, grad_norm = _optimizer_step(trainer, step)
+        if did_step:
+            last_grad_norm = grad_norm
 
         cur_lr = trainer.optimizer.param_groups[0]["lr"]
         _update_running_loss(running, loss_dict)
@@ -580,15 +600,25 @@ def run_train_epoch(
                 running_plate_acc,
                 running_char_acc,
                 input_lengths=input_lengths,
+                grad_norm=last_grad_norm,
+                accum_step=step % accum_steps if not did_step else accum_steps,
+                accum_total=accum_steps,
             )
             batches_since_update = 0
 
             del output
 
-        if trainer._interrupt_requested:
+        if trainer._interrupt_requested or trainer._force_stop:
             break
 
     running["avg_batch_ms"] = avg_batch_ms
+
+    # If force-stopped, skip gradient flush and final accuracy computation
+    # to exit as fast as possible — the interrupted checkpoint will capture
+    # model state as-is.
+    if trainer._force_stop:
+        _compute_final_loss_avgs(running)
+        return running
 
     # Flush any remaining accumulated gradients at end of epoch.
     # Only flush if there are un-stepped batches (avoids phantom optimizer

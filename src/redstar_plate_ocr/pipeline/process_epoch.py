@@ -100,7 +100,9 @@ def _run_e2e_eval(
     e2e_metrics = trainer.evaluator.evaluate(
         trainer.model,
         val_loader,
-        interrupt_check=lambda: trainer._interrupt_requested,
+        interrupt_check=lambda: (
+            trainer._interrupt_requested or trainer._force_stop
+        ),
         e2e=True,
     )
     for k, v in e2e_metrics.items():
@@ -195,7 +197,9 @@ def _run_validation(
     val_metrics = trainer.evaluator.evaluate(
         trainer.model,
         val_loader,
-        interrupt_check=lambda: trainer._interrupt_requested,
+        interrupt_check=lambda: (
+            trainer._interrupt_requested or trainer._force_stop
+        ),
     )
     _inject_train_acc(val_metrics, train_result)
     last_metrics = dict(val_metrics)
@@ -269,6 +273,13 @@ def _run_validation(
         _update_warmup_display(
             progress_display,
             severe_scheduler,
+            phase=_get_phase(config, epoch, severe_scheduler),
+            lr_warmup_epoch=min(epoch + 1, config.warmup_epochs)
+            if epoch < config.warmup_epochs
+            else None,
+            lr_warmup_total=config.warmup_epochs
+            if epoch < config.warmup_epochs
+            else None,
         )
 
     return _ValidationOutcome(
@@ -284,16 +295,23 @@ def _run_validation(
 def _update_warmup_display(
     progress_display: ProgressDisplay,
     severe_scheduler: SevereAugScheduler,
+    *,
+    phase: str = "",
+    lr_warmup_epoch: int | None = None,
+    lr_warmup_total: int | None = None,
 ) -> None:
-    """Update warmup status line in progress display."""
-    preproc_str = "on" if severe_scheduler.preprocessing_enabled else "off"
-    text = (
-        f"🔥 Warmup: severe={severe_scheduler.severe_severity:.3f} "
-        f"std={severe_scheduler.std_severity:.3f} "
-        f"preproc={preproc_str} "
-        f"best_acc={severe_scheduler.best_word_acc:.4f}"
+    """Update warmup status line with visual transition bars."""
+    progress_display.update_warmup_detail(
+        severe_severity=severe_scheduler.severe_severity,
+        std_severity=severe_scheduler.std_severity,
+        preprocessing_enabled=severe_scheduler.preprocessing_enabled,
+        best_word_acc=severe_scheduler.best_word_acc,
+        epochs_without_improvement=severe_scheduler.epochs_without_improvement,
+        patience_severe=severe_scheduler.patience_severe,
+        phase=phase,
+        lr_warmup_epoch=lr_warmup_epoch,
+        lr_warmup_total=lr_warmup_total,
     )
-    progress_display.update_warmup_status(text)
 
 
 def _build_train_metrics(
@@ -467,7 +485,26 @@ def process_epoch(
     config: TrainingConfig = trainer.config
     phase = _get_phase(config, epoch, severe_scheduler)
     cur_lr = trainer.optimizer.param_groups[0]["lr"]
-    desc = f"Epoch {epoch + 1}/{config.epochs} [{phase}] LR={cur_lr:.4f}"
+
+    # Phase icon for batch desc
+    _PHASE_ICONS = {
+        "Warmup": "🔥  ",
+        "SevereWarmup": "🔥  ",
+        "SingleAug": "⚡  ",
+        "Main": "🏁  ",
+        "NoAug": "🧹  ",
+    }
+    phase_icon = _PHASE_ICONS.get(phase, "")
+
+    # Build header with extra context
+    header_parts = [f"Ep{epoch + 1}/{config.epochs}"]
+    if phase_icon:
+        header_parts.append(phase_icon)
+    if epoch < config.warmup_epochs:
+        header_parts.append(f"LR↑  {epoch + 1}/{config.warmup_epochs}")
+    if config.gradient_accumulation_steps > 1:
+        header_parts.append(f"×{config.gradient_accumulation_steps}")
+    desc = " ".join(header_parts) + f" lr={cur_lr:.6g}"
 
     sampling_prob = compute_sampling_prob(
         epoch,
@@ -475,14 +512,35 @@ def process_epoch(
         config.scheduled_sampling_ramp_epochs,
     )
 
+    # Append early-stopping countdown to desc
+    if config.es_patience > 0:
+        desc += f" 🛑  {patience_counter}/{config.es_patience}"
+
     batch_task = progress_display.add_batch_task(
         desc,
         total=len(train_loader),
         stats="",
     )
-    # Warmup status line: only shown when enable_warmup=True
+    # Warmup status line
     if severe_scheduler is not None:
-        _update_warmup_display(progress_display, severe_scheduler)
+        _update_warmup_display(
+            progress_display,
+            severe_scheduler,
+            phase=phase,
+            lr_warmup_epoch=min(epoch + 1, config.warmup_epochs)
+            if epoch < config.warmup_epochs
+            else None,
+            lr_warmup_total=config.warmup_epochs
+            if epoch < config.warmup_epochs
+            else None,
+        )
+    elif epoch < config.warmup_epochs and config.warmup_epochs > 0:
+        # Plain LR warmup (no adaptive aug)
+        progress_display.update_warmup_detail(
+            phase=phase,
+            lr_warmup_epoch=epoch + 1,
+            lr_warmup_total=config.warmup_epochs,
+        )
     else:
         progress_display.hide_warmup_status()
     progress_display.update_epoch_summary(
@@ -506,7 +564,7 @@ def process_epoch(
     )
     progress_display.remove_batch_task(batch_task)
 
-    if trainer._interrupt_requested:
+    if trainer._interrupt_requested or trainer._force_stop:
         return _make_interrupt_result(
             best_metric, best_metrics, patience_counter, epoch
         )

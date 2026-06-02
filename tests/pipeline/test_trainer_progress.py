@@ -97,7 +97,7 @@ def test_format_epoch_stats_basic():
         0.5,
     )
     assert "loss=0.5000" in result
-    assert "plate=85.000%" in result
+    assert "plate=85.0%" in result
     assert "cer=0.1200" in result
 
 
@@ -116,7 +116,7 @@ def test_format_epoch_stats_empty_best_no_arrows():
         {},
         0.5,
     )
-    assert "plate=85.000%" in result
+    assert "plate=85.0%" in result
     assert "cer=0.1200" in result
     assert "↑" not in result
     assert "↓" not in result
@@ -144,7 +144,7 @@ def test_format_epoch_stats_shows_best_indicators():
         best_metrics,
         0.5,
     )
-    assert "plate=95.000%↑" in result
+    assert "plate=95.0%↑" in result
     assert "cer=0.0500↓" in result
 
 
