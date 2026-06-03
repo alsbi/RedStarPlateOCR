@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 import os
 
 import cv2
@@ -10,6 +11,8 @@ import numpy as np
 import torch
 
 from redstar_plate_ocr.data.transforms import PreprocessPipeline
+
+logger = logging.getLogger(__name__)
 
 
 class PlateDataset(torch.utils.data.Dataset):
@@ -97,7 +100,8 @@ class PlateDataset(torch.utils.data.Dataset):
         """Читает изображение и конвертирует в RGB."""
         img = cv2.imread(path, cv2.IMREAD_COLOR)
         if img is None:
-            raise FileNotFoundError(f"Image not found: {path}")
+            logger.warning("Image not found: %s — using placeholder", path)
+            return np.zeros((80, 256, 3), dtype=np.uint8)
         return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     @staticmethod
