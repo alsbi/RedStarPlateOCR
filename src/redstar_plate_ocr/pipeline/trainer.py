@@ -663,12 +663,12 @@ class Trainer:
         )
         file_handler.setFormatter(fmt)
         logging.getLogger().addHandler(file_handler)
-        self._log_training_config()
-        signal.signal(signal.SIGINT, self._handle_interrupt)
 
         best_metrics: dict[str, float] = {}
         last_metrics: dict[str, float] = {}
         try:
+            self._log_training_config()
+            signal.signal(signal.SIGINT, self._handle_interrupt)
             best_metrics, last_metrics = self._run_main_training()
             if best_metrics:
                 logger.warning(
