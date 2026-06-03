@@ -47,6 +47,7 @@ def _make_trainer(plate_config: PlateConfig) -> Trainer:
             "use_amp": False,
         },
         "augmentation": {
+            "warmup": {"enable_warmup": False},
             "rotation": {"enabled": True, "limit": 5, "p": 0.5},
         },
     }
