@@ -63,7 +63,8 @@ class Evaluator:
                 int(input_lengths[i]) if input_lengths is not None else None
             )
             if self.beam_width > 1:
-                pred, _ = self._beam_decoder.decode(ctc[i])
+                ctc_slice = ctc[i][:inp_len] if inp_len is not None else ctc[i]
+                pred, _ = self._beam_decoder.decode(ctc_slice)
             else:
                 pred = greedy_decode(
                     ctc[i], union_alphabet, input_length=inp_len
