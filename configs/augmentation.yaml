@@ -65,4 +65,5 @@ warmup:
   patience_severe: 10            # Epochs without improvement before forced severe decrease
   severe_threshold_std_start: 0.3  # severe level where std starts growing
   severe_midpoint: 0.15           # Intermediate point for std transition curve
+  severe_ramp_value: 2.0          # Slope of std_severity ramp in the midpoint→threshold segment
   early_stop_patience: 15        # Early stopping patience after severe is disabled

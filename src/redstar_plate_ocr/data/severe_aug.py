@@ -344,6 +344,7 @@ class SevereAugScheduler:
         patience_severe: int = 10,
         severe_threshold_std_start: float = 0.3,
         severe_midpoint: float = 0.15,
+        severe_ramp_value: float = 2.0,
         early_stop_patience: int = 15,
     ) -> None:
         self.severe_severity: float = initial_severity
@@ -360,6 +361,7 @@ class SevereAugScheduler:
         # Параметры кривой перехода
         self.severe_threshold_std_start: float = severe_threshold_std_start
         self.severe_midpoint: float = severe_midpoint
+        self.severe_ramp_value: float = severe_ramp_value
 
     def update_schedule(self, word_acc: float, epoch: int) -> None:
         """Обновить расписание после эпохи валидации.
@@ -414,15 +416,18 @@ class SevereAugScheduler:
             if self.severe_severity >= self.severe_threshold_std_start:
                 self.std_severity = 0.0
             elif self.severe_severity >= self.severe_midpoint:
-                # От 0.3 до 0.15: линейно от 0 до 0.3
-                self.std_severity = 2.0 * (
+                # От severe_threshold_std_start до severe_midpoint:
+                # линейно от 0 до severe_threshold_std_start
+                self.std_severity = self.severe_ramp_value * (
                     self.severe_threshold_std_start - self.severe_severity
                 )
             else:
-                # От 0.15 до 0: линейно от 0.3 до 1.0
-                self.std_severity = 0.3 + (0.7 / self.severe_midpoint) * (
-                    self.severe_midpoint - self.severe_severity
-                )
+                # От severe_midpoint до 0:
+                # линейно от severe_threshold_std_start до 1.0
+                self.std_severity = self.severe_threshold_std_start + (
+                    (1.0 - self.severe_threshold_std_start)
+                    / self.severe_midpoint
+                ) * (self.severe_midpoint - self.severe_severity)
 
         # 3. Предобработка включается при std_severity >= 0.5
         self.preprocessing_enabled = self.std_severity >= 0.5

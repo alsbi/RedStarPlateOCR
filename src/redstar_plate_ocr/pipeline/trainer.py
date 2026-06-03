@@ -203,6 +203,7 @@ class Trainer:
                     self.config.severe_threshold_std_start
                 ),
                 severe_midpoint=self.config.severe_midpoint,
+                severe_ramp_value=self.config.severe_ramp_value,
                 early_stop_patience=(self.config.early_stop_patience),
             )
         else:

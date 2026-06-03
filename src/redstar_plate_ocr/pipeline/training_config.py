@@ -75,6 +75,7 @@ class TrainingConfig:
     patience_severe: int = 10
     severe_threshold_std_start: float = 0.3
     severe_midpoint: float = 0.15
+    severe_ramp_value: float = 2.0
     early_stop_patience: int = 15
 
     # Loss weights
@@ -150,6 +151,7 @@ class TrainingConfig:
                 "severe_threshold_std_start", 0.3
             ),
             severe_midpoint=warmup.get("severe_midpoint", 0.15),
+            severe_ramp_value=warmup.get("severe_ramp_value", 2.0),
             early_stop_patience=warmup.get("early_stop_patience", 15),
             format_weight=training.get("format_weight", 1.0),
             country_weight=training.get("country_weight", 1.5),
