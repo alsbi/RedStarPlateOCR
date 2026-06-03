@@ -193,13 +193,11 @@ class Exporter:
 
         # Remove any existing entries to avoid duplicates
         keys_to_remove = {_METADATA_KEY, _PREPROCESS_KEY}
-        onnx_model.metadata_props.extend(
-            [
-                p
-                for p in onnx_model.metadata_props
-                if p.key not in keys_to_remove
-            ]
-        )
+        keep = [
+            p for p in onnx_model.metadata_props if p.key not in keys_to_remove
+        ]
+        onnx_model.ClearField("metadata_props")
+        onnx_model.metadata_props.extend(keep)
 
         entry = onnx.StringStringEntryProto()
         entry.key = _METADATA_KEY
