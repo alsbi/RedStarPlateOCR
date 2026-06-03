@@ -616,8 +616,6 @@ def run_train_epoch(
             )
             batches_since_update = 0
 
-            del output
-
         if trainer._interrupt_requested or trainer._force_stop:
             break
 

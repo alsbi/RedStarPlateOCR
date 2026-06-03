@@ -432,21 +432,6 @@ class SevereAugScheduler:
         # 3. Предобработка включается при std_severity >= 0.5
         self.preprocessing_enabled = self.std_severity >= 0.5
 
-    def should_stop_early(self) -> bool:
-        """Проверить условие раннего останова.
-
-        Ранний останов ОТКЛЮЧЁН пока severe_severity > 0.
-        После обнуления severe активируется стандартный ранний
-        останов с patience=early_stop_patience.
-
-        Returns:
-            Всегда ``False``; реальная проверка через
-            :meth:`check_early_stop`.
-        """
-        if self.severe_severity > 0:
-            return False
-        return False
-
     def check_early_stop(self, word_acc: float) -> bool:
         """Проверить, следует ли остановить обучение досрочно.
 
