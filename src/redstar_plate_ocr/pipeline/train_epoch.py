@@ -131,7 +131,15 @@ def _backward_step(
     trainer: Trainer,
     loss: torch.Tensor,
 ) -> None:
-    """Backward pass with optional AMP scaling."""
+    """Backward pass with optional AMP scaling and NaN guard."""
+    if not torch.isfinite(loss):
+        logger.warning(
+            "Non-finite loss %.4f, skipping backward",
+            loss.item(),
+        )
+        trainer.optimizer.zero_grad()
+        trainer.country_optimizer.zero_grad()
+        return
     if trainer.use_amp:
         trainer.scaler.scale(loss).backward()
     else:
@@ -341,7 +349,9 @@ def _update_running_loss(
     """
     running["_loss_count"] = running.get("_loss_count", 0) + 1
     # Latest total loss for progress bar display
-    running["loss"] = loss_dict["total"].item()
+    loss_val = loss_dict["total"].item()
+    running["loss"] = loss_val
+    running["_sum_loss"] = running.get("_sum_loss", 0.0) + loss_val
     # Per-component: latest value + running sum for averaging
     for key in _LOSS_COMPONENTS:
         if key in loss_dict:
@@ -360,8 +370,8 @@ def _compute_final_loss_avgs(running: dict[str, float]) -> None:
         if sum_key in running:
             running[key] = running[sum_key] / count
     # Also average the total loss
-    if "_sum_loss" not in running and "loss" in running:
-        pass  # total loss kept as-is (latest value)
+    if "_sum_loss" in running:
+        running["loss"] = running["_sum_loss"] / count
     # Cleanup internal keys
     for k in list(running):
         if k.startswith("_sum_") or k == "_loss_count":
