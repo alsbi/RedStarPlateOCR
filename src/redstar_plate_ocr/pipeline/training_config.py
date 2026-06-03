@@ -139,10 +139,10 @@ class TrainingConfig:
             order_weight=training.get("order_weight", 0.0),
             order_margin=training.get("order_margin", 1.0),
             length_weight=training.get("length_weight", 0.0),
-            enable_warmup=warmup.get("enable_warmup", False),
+            enable_warmup=warmup.get("enable_warmup", True),
             initial_severity=warmup.get("initial_severity", 1.0),
             threshold_disable_severe=warmup.get(
-                "threshold_disable_severe", 0.3
+                "threshold_disable_severe", 0.15
             ),
             severe_step=warmup.get("severe_step", 0.01),
             patience_severe=warmup.get("patience_severe", 10),
