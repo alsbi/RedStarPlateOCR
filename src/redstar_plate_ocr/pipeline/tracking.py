@@ -160,7 +160,6 @@ class MetricsTracker:
             self._queue = Queue(maxsize=self._QUEUE_MAX_SIZE)
             self._writer_thread = threading.Thread(
                 target=self._writer_loop,
-                daemon=True,
                 name="trackio-writer",
             )
             self._writer_thread.start()
@@ -216,13 +215,18 @@ class MetricsTracker:
         images: dict[str, Any],
         step: int | None = None,
     ) -> None:
-        """Log images for visual debugging (direct call, rare)."""
+        """Log images for visual debugging (async via queue)."""
         if not self.enabled:
             return
 
-        import trackio
-
-        trackio.log(images, step=step)
+        if self._queue is not None:
+            try:
+                self._queue.put_nowait((images, step))
+            except Full:
+                logger.warning(
+                    "TrackIO queue full — dropping images step=%s",
+                    step,
+                )
 
     def finish(self) -> None:
         """Finish tracking session."""
