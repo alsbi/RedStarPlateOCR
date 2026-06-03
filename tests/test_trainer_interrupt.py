@@ -121,15 +121,13 @@ class TestFirstInterrupt:
     def test_prints_graceful_message(self, plate_config):
         trainer = _make_trainer(plate_config)
         with patch(
-            "redstar_plate_ocr.pipeline.trainer.Console",
-        ) as mock_console_cls:
-            mock_console = MagicMock()
-            mock_console_cls.return_value = mock_console
+            "redstar_plate_ocr.pipeline.trainer.os.write",
+        ) as mock_write:
             trainer._handle_interrupt(signal.SIGINT, None)
 
-        mock_console.print.assert_called_once()
-        msg = mock_console.print.call_args[0][0]
-        assert "Interrupt requested" in msg
+        mock_write.assert_called_once()
+        msg = mock_write.call_args[0][1]
+        assert b"Interrupt" in msg
 
     def test_saves_checkpoint(self, plate_config):
         """When _interrupt_requested is set mid-training, an interrupted
@@ -169,15 +167,13 @@ class TestSecondInterrupt:
         trainer = _make_trainer(plate_config)
         trainer._handle_interrupt(signal.SIGINT, None)  # first
         with patch(
-            "redstar_plate_ocr.pipeline.trainer.Console",
-        ) as mock_console_cls:
-            mock_console = MagicMock()
-            mock_console_cls.return_value = mock_console
+            "redstar_plate_ocr.pipeline.trainer.os.write",
+        ) as mock_write:
             trainer._handle_interrupt(signal.SIGINT, None)  # second
 
-        mock_console.print.assert_called_once()
-        msg = mock_console.print.call_args[0][0]
-        assert "Force stop" in msg
+        mock_write.assert_called_once()
+        msg = mock_write.call_args[0][1]
+        assert b"Force stop" in msg
 
     def test_saves_interrupted_checkpoint(self, plate_config):
         """Force stop still saves a checkpoint to disk."""

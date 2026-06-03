@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import signal
 import threading
@@ -534,24 +535,18 @@ class Trainer:
             # Second Ctrl+C: force stop (skip validation & gradient flush)
             self._force_stop = True
             logger.info("Force stop requested...")
-            try:
-                Console().print(
-                    "[bold red]⏹ Force stop — exiting immediately.[/bold red]"
-                )
-            except Exception:
-                pass
+            os.write(
+                1, b"[red]Force stop \xe2\x80\x94 exiting immediately.[/red]\n"
+            )
             return
         # First Ctrl+C: graceful stop after current batch
         self._interrupt_requested = True
         logger.info("Interrupt requested, finishing current batch...")
-        try:
-            Console().print(
-                "[bold yellow]⏹ Interrupt requested — "
-                "finishing current batch... "
-                "Press Ctrl+C again to force stop.[/bold yellow]"
-            )
-        except Exception:
-            pass  # Don't crash in signal handler
+        os.write(
+            1,
+            b"[yellow]Interrupt \xe2\x80\x94 finishing current batch... "
+            b"Press Ctrl+C again to force stop.[/yellow]\n",
+        )
 
     def _save_interrupted_checkpoint(
         self,
