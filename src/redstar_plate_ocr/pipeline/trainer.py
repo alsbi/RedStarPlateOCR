@@ -704,13 +704,12 @@ class Trainer:
             signal.signal(signal.SIGINT, signal.SIG_IGN)
             logging.getLogger().removeHandler(file_handler)
             file_handler.close()
+            if self._save_thread is not None:
+                self._save_thread.join()
             signal.signal(
                 signal.SIGINT,
                 signal.default_int_handler,
             )
-
-        if self._save_thread is not None:
-            self._save_thread.join()
 
         if self._interrupt_requested or self._force_stop:
             Console().print(
