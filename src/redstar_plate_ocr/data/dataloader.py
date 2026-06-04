@@ -193,6 +193,21 @@ def seed_worker(worker_id: int) -> None:
     torch.set_num_threads(1)
 
 
+def _effective_num_workers(requested: int) -> int:
+    """Return safe number of workers for the current platform.
+
+    On macOS ``spawn`` forces each worker to re-import the entire Python
+    stack (torch, cv2, numpy, …) which adds 2–5 s overhead per worker
+    and 17× pickle latency *per batch*.  For small-to-medium datasets
+    single-process loading (0 workers) is significantly faster.
+    Linux ``fork`` does copy-on-write so workers are cheap — keep
+    the requested count there.
+    """
+    if requested > 0 and platform.system() == "Darwin":
+        return 0
+    return requested
+
+
 def build_dataloader(
     dataset: PlateDataset | _ConcatDatasetWithSamples,
     batch_size: int = 32,
@@ -213,9 +228,10 @@ def build_dataloader(
         original_len=original_len,
     )
 
+    nw = _effective_num_workers(num_workers)
     pin_memory = device is not None and device.type == "cuda"
     kwargs: dict = {"pin_memory": pin_memory}
-    if num_workers > 0:
+    if nw > 0:
         kwargs["persistent_workers"] = True
         kwargs["prefetch_factor"] = 1
         kwargs["worker_init_fn"] = seed_worker
@@ -225,7 +241,7 @@ def build_dataloader(
     return torch.utils.data.DataLoader(
         dataset,
         batch_sampler=batch_sampler,
-        num_workers=num_workers,
+        num_workers=nw,
         collate_fn=_simple_collate_fn,
         **kwargs,
     )
