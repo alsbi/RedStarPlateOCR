@@ -17,7 +17,7 @@ _METRIC_LABELS = {
     "val_plate_accuracy": "Plate (exact match)",
     "val_cer": "CER",
     "val_char_accuracy": "Char Accuracy",
-    "val_country_accuracy": "Region",
+    "val_country_accuracy": "Country",
     "val_format_accuracy": "Format",
     "val_standard_accuracy": "Standard",
     "val_square_accuracy": "Square",

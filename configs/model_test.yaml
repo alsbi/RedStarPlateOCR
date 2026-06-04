@@ -1,0 +1,14 @@
+# Minimal model config for CLI tests
+preprocessing:
+  canvas_height: 80
+  canvas_width: 256
+  pad_color: 128
+  normalization:
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
+
+training:
+  epochs: 1
+  lr: 0.001
+  batch_size: 4
+  use_amp: false

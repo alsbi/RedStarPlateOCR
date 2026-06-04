@@ -572,7 +572,6 @@ def process_epoch(
     should_validate = (epoch + 1) % config.val_every_n_epochs == 0
 
     val_metrics: dict[str, float] = dict(best_metrics)
-    is_cached = True
     last_metrics: dict[str, float] = dict(best_metrics)
 
     if should_validate:
@@ -601,7 +600,6 @@ def process_epoch(
         best_metric = result.best_metric
         best_metrics = result.best_metrics
         patience_counter = result.patience_counter
-        is_cached = False
 
         # Log metrics to TrackIO / console after validation
         if tracker is not None:
@@ -644,7 +642,6 @@ def process_epoch(
         val_metrics,
         best_metrics,
         train_loss,
-        is_cached=is_cached,
         epoch_duration=epoch_duration,
     )
     progress_display.hide_validation()

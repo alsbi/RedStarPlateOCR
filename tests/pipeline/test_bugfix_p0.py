@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -156,7 +156,6 @@ class TestResumeEpochCheck:
 class TestAugmentationMerge:
     """Tests for --augmentation CLI parameter merging into config."""
 
-    @pytest.mark.skip(reason="pre-existing: configs/model_test.yaml missing")
     def test_augmentation_option_merges_config(
         self,
     ) -> None:
@@ -165,13 +164,25 @@ class TestAugmentationMerge:
             aug_path = Path(tmp) / "aug.yaml"
             aug_path.write_text("blur:\n  p: 0.5\n  blur_limit: 3\n")
 
-            with patch(
-                "redstar_plate_ocr.pipeline.trainer.Trainer.train",
-            ) as mock_train:
+            with (
+                patch(
+                    "redstar_plate_ocr.pipeline.trainer.Trainer.train",
+                ) as mock_train,
+                patch(
+                    "redstar_plate_ocr.presentation.display._print_startup_panel",
+                ) as mock_panel,
+                patch(
+                    "redstar_plate_ocr.presentation.cli._save_training_artifacts",
+                ) as mock_artifacts,
+                patch(
+                    "redstar_plate_ocr.presentation.cli._build_datasets",
+                ) as mock_build,
+            ):
                 mock_train.return_value = {
                     "best": {},
                     "last": {},
                 }
+                mock_build.return_value = (MagicMock(), MagicMock())
 
                 # We need to intercept the cfg passed to Trainer
                 original_init = (
@@ -183,7 +194,6 @@ class TestAugmentationMerge:
                     captured_cfg.update(
                         kwargs.get("cfg", args[5] if len(args) > 5 else {})
                     )
-                    # Call original but skip actual init
                     return None
 
                 with patch(
@@ -216,13 +226,25 @@ class TestAugmentationMerge:
     ) -> None:
         """Without --augmentation, cfg['augmentation'] stays as-is."""
         with tempfile.TemporaryDirectory() as tmp:
-            with patch(
-                "redstar_plate_ocr.pipeline.trainer.Trainer.train",
-            ) as mock_train:
+            with (
+                patch(
+                    "redstar_plate_ocr.pipeline.trainer.Trainer.train",
+                ) as mock_train,
+                patch(
+                    "redstar_plate_ocr.presentation.display._print_startup_panel",
+                ) as mock_panel,
+                patch(
+                    "redstar_plate_ocr.presentation.cli._save_training_artifacts",
+                ) as mock_artifacts,
+                patch(
+                    "redstar_plate_ocr.presentation.cli._build_datasets",
+                ) as mock_build,
+            ):
                 mock_train.return_value = {
                     "best": {},
                     "last": {},
                 }
+                mock_build.return_value = (MagicMock(), MagicMock())
 
                 original_init = (
                     "redstar_plate_ocr.pipeline.trainer.Trainer.__init__"

@@ -10,7 +10,11 @@ from torch import Tensor
 
 from redstar_plate_ocr.nn.mask_table import MASK_VALUE
 from redstar_plate_ocr.pipeline.preprocess import PreprocessPipeline
-from redstar_plate_ocr.pipeline.utils import softmax
+from redstar_plate_ocr.pipeline.utils import (
+    detect_device,
+    get_onnx_providers,
+    softmax,
+)
 from redstar_plate_ocr.plate.config import PlateConfig
 from redstar_plate_ocr.plate.postprocess import (
     BeamSearchDecoder,
@@ -204,17 +208,20 @@ class PyTorchRecognizer(_BaseRecognizer):
         self.model = model
         if device is not None:
             self.device = torch.device(device)
-        else:
-            # Auto-detect: CUDA → MPS → CPU (same logic as Trainer)
-            if torch.cuda.is_available():
-                self.device = torch.device("cuda")
-            elif (
-                hasattr(torch.backends, "mps")
-                and torch.backends.mps.is_available()
-            ):
-                self.device = torch.device("mps")
+            # Infer backend from device type (no env override here —
+            # detect_device handles that when device=None).
+            if self.device.type == "cuda":
+                self.backend = (
+                    "rocm"
+                    if getattr(torch.version, "hip", None)
+                    else "cuda"
+                )
+            elif self.device.type == "mps":
+                self.backend = "mps"
             else:
-                self.device = torch.device("cpu")
+                self.backend = "cpu"
+        else:
+            self.device, _, self.backend = detect_device(use_amp=False)
         # Move real model to the target device
         if isinstance(self.model, torch.nn.Module):
             self.model = self.model.to(self.device)
@@ -295,7 +302,8 @@ class ONNXRecognizer(_BaseRecognizer):
         )
         import onnxruntime as ort  # type: ignore[import-untyped]
 
-        self.session = ort.InferenceSession(model_path)
+        providers = get_onnx_providers()
+        self.session = ort.InferenceSession(model_path, providers=providers)
 
     @staticmethod
     def _read_config_from_metadata(

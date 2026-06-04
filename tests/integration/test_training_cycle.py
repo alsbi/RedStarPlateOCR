@@ -3,30 +3,31 @@
 from pathlib import Path
 
 import pytest
+from redstar_plate_ocr.pipeline.utils import find_csv
 
 
 @pytest.fixture
 def train_dataset():
-    csv_path = Path("data/train.csv")
-    if not csv_path.exists():
+    csv_path = find_csv("data", "train")
+    if not Path(csv_path).exists():
         pytest.skip("No training data available")
     from redstar_plate_ocr.data.dataset import PlateDataset
 
     return PlateDataset(
-        csv_path=str(csv_path),
+        csv_path=csv_path,
         dataset_root="data",
     )
 
 
 @pytest.fixture
 def val_dataset():
-    csv_path = Path("data/val.csv")
-    if not csv_path.exists():
+    csv_path = find_csv("data", "val")
+    if not Path(csv_path).exists():
         pytest.skip("No validation data available")
     from redstar_plate_ocr.data.dataset import PlateDataset
 
     return PlateDataset(
-        csv_path=str(csv_path),
+        csv_path=csv_path,
         dataset_root="data",
     )
 

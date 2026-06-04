@@ -158,7 +158,7 @@ def test_format_epoch_stats_compact_format():
     result = format_epoch_stats(val, {}, 1.5)
     assert "plate=85.6%" in result
     assert "char=93.4%" in result
-    assert "region=70.0%" in result
+    assert "country=70.0%" in result
     assert "fmt=60.0%" in result
     assert "std=50.0%" in result
     assert "sq=40.0%" in result

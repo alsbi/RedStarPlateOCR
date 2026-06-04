@@ -8,6 +8,7 @@ import random
 from collections import defaultdict
 from typing import Any, Protocol
 
+import cv2
 import numpy as np
 import torch
 from torch.utils.data import ConcatDataset, Sampler
@@ -178,10 +179,18 @@ def _simple_collate_fn(batch: list[dict]) -> dict:
 
 
 def seed_worker(worker_id: int) -> None:
-    """Seed worker for reproducible augmentation."""
+    """Seed worker for reproducible augmentation.
+
+    Also disables internal thread pools in worker processes to prevent
+    thread explosion when multiple workers run concurrently — each worker
+    is a separate process and only needs one thread for I/O + transforms.
+    This is universally beneficial (macOS ``spawn``, Linux ``fork``).
+    """
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
+    cv2.setNumThreads(0)
+    torch.set_num_threads(1)
 
 
 def build_dataloader(
@@ -208,7 +217,7 @@ def build_dataloader(
     kwargs: dict = {"pin_memory": pin_memory}
     if num_workers > 0:
         kwargs["persistent_workers"] = True
-        kwargs["prefetch_factor"] = 2
+        kwargs["prefetch_factor"] = 1
         kwargs["worker_init_fn"] = seed_worker
         if platform.system() == "Darwin":
             kwargs["multiprocessing_context"] = "spawn"

@@ -179,6 +179,10 @@ def evaluate(
         "--e2e",
         help="E2E mode (no teacher forcing)",
     ),
+    device: str | None = typer.Option(
+        None,
+        help="Device override: cuda, mps, cpu (autodetect if omitted)",
+    ),
 ) -> None:
     """Evaluate model on a dataset."""
 
@@ -188,7 +192,13 @@ def evaluate(
 
     setup_logging(verbose=_verbose_count)
 
-    model, pc = _load_model_for_inference(config, plate_config, checkpoint)
+    device_obj = torch.device(device) if device else None
+    model, pc = _load_model_for_inference(
+        config,
+        plate_config,
+        checkpoint,
+        device=device_obj,
+    )
 
     preproc_params = _preprocess_params_from_config(config)
     csv_path = find_csv(data_dir, split)
@@ -202,11 +212,12 @@ def evaluate(
     from redstar_plate_ocr.data.dataloader import build_dataloader
 
     loader = build_dataloader(ds, batch_size=32, is_train=False, num_workers=0)
-    from redstar_plate_ocr.pipeline.trainer import get_device_and_amp
+    if device_obj is None:
+        from redstar_plate_ocr.pipeline.utils import detect_device
 
-    device, _ = get_device_and_amp(False)
-    model = model.to(device)
-    evaluator = Evaluator(pc, device)
+        device_obj, _, _ = detect_device(use_amp=False)
+    model = model.to(device_obj)
+    evaluator = Evaluator(pc, device_obj)
     metrics = evaluator.evaluate(model, loader, e2e=e2e)
 
     table = Table(title="Evaluation Results")
@@ -261,11 +272,16 @@ def predict(
         help="Plate config YAML (optional for ONNX with embedded config)",
     ),
     image: str = typer.Option(..., help="Image path"),
+    device: str | None = typer.Option(
+        None,
+        help="Device override: cuda, mps, cpu (autodetect if omitted)",
+    ),
 ) -> None:
     """Recognize a single plate image."""
     import cv2
 
     setup_logging(verbose=_verbose_count)
+    device_obj = torch.device(device) if device else None
 
     is_onnx = checkpoint.lower().endswith(".onnx")
 
@@ -288,14 +304,19 @@ def predict(
                 "for PyTorch checkpoints[/red]"
             )
             raise typer.Exit(code=1)
-        model, pc = _load_model_for_inference(config, plate_config, checkpoint)
+        model, pc = _load_model_for_inference(
+            config,
+            plate_config,
+            checkpoint,
+            device=device_obj,
+        )
         preproc_params = _preprocess_params_from_config(config)
-        device = next(model.parameters()).device
+        recognized_device = next(model.parameters()).device
         recognizer = PyTorchRecognizer(
             model=model,
             plate_config=pc,
             preprocess_params=preproc_params,
-            device=device,
+            device=recognized_device,
         )
 
     img = cv2.imread(image)
@@ -340,6 +361,10 @@ def export(
         "model.onnx",
         help="Output ONNX path",
     ),
+    device: str | None = typer.Option(
+        None,
+        help="Device override: cuda, mps, cpu (autodetect if omitted)",
+    ),
 ) -> None:
     """Export model to ONNX format."""
 
@@ -347,7 +372,13 @@ def export(
 
     setup_logging(verbose=_verbose_count)
 
-    model, _pc = _load_model_for_inference(config, plate_config, checkpoint)
+    device_obj = torch.device(device) if device else None
+    model, _pc = _load_model_for_inference(
+        config,
+        plate_config,
+        checkpoint,
+        device=device_obj,
+    )
     _preproc_params = _preprocess_params_from_config(config)
     # Build raw preprocessing config for embedding into ONNX metadata
     with open(config) as f:
@@ -435,9 +466,9 @@ def _load_model_for_inference(
     from redstar_plate_ocr.nn.model import PlateOCRModel
 
     if device is None:
-        from redstar_plate_ocr.pipeline.trainer import get_device_and_amp
+        from redstar_plate_ocr.pipeline.utils import detect_device
 
-        device, _ = get_device_and_amp(False)
+        device, _, _ = detect_device(use_amp=False)
 
     pc = _load_plate_config(plate_config)
     cfg = _load_model_config(config)

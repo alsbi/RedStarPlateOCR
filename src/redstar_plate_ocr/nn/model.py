@@ -494,6 +494,12 @@ class PlateOCRModel(nn.Module):
         """Full forward pass."""
         backbone_out: BackboneOutput = self.backbone(images)
         features = self.fusion(backbone_out.stage1, backbone_out.final)
+
+        # Ensure orig_h/orig_w are on the same device as features —
+        # guards against accidental CPU tensors passed from user code.
+        orig_h = orig_h.to(features.device)
+        orig_w = orig_w.to(features.device)
+
         content_mask = self.compression.compute_content_mask(
             orig_h,
             orig_w,

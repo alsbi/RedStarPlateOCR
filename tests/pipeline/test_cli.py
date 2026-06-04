@@ -212,7 +212,7 @@ def test_cli_train_shows_all_metrics_with_labels() -> None:
         output = result.output
         assert "Plate (exact match)" in output
         assert "CER" in output
-        assert "Region" in output
+        assert "Country" in output
         assert "Format" in output
         assert "Square" in output
 

@@ -159,8 +159,8 @@ def test_format_epoch_stats_first_epoch() -> None:
     assert "plate=80.0%" in result
 
 
-def test_format_epoch_stats_cached() -> None:
-    """Cached tag appears when is_cached=True."""
+def test_format_epoch_stats_correct_labels() -> None:
+    """Output uses correct metric labels."""
     val_metrics: dict[str, float] = {
         "val_plate_accuracy": 0.80,
         "val_cer": 0.10,
@@ -174,9 +174,10 @@ def test_format_epoch_stats_cached() -> None:
         val_metrics,
         {},
         train_loss=1.0,
-        is_cached=True,
     )
-    assert "(cached)" in result
+    assert "country=" in result
+    assert "cached" not in result
+    assert "region=" not in result
 
 
 # ── ProgressDisplay lifecycle ───────────────────────

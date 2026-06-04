@@ -191,8 +191,8 @@ class TestTrainerBuildTrainLoaderIntegration:
         }
 
         with patch(
-            "redstar_plate_ocr.pipeline.trainer.get_device_and_amp",
-            return_value=(torch.device("cpu"), False),
+            "redstar_plate_ocr.pipeline.utils.detect_device",
+            return_value=(torch.device("cpu"), False, "cpu"),
         ):
             return Trainer(
                 model=model,

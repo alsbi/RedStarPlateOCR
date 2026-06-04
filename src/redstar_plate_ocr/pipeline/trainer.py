@@ -39,31 +39,16 @@ from redstar_plate_ocr.pipeline.progress_display import ProgressDisplay
 from redstar_plate_ocr.pipeline.tracking import MetricsTracker
 from redstar_plate_ocr.pipeline.train_epoch import run_train_epoch
 from redstar_plate_ocr.pipeline.training_config import TrainingConfig
-from redstar_plate_ocr.pipeline.utils import format_duration
+from redstar_plate_ocr.pipeline.utils import (
+    detect_device,
+    format_duration,
+)
 from redstar_plate_ocr.plate.config import PlateConfig
 
 _IMAGENET_MEAN = [0.485, 0.456, 0.406]
 _IMAGENET_STD = [0.229, 0.224, 0.225]
 
 logger = logging.getLogger(__name__)
-
-
-def get_device_and_amp(use_amp: bool) -> tuple[torch.device, bool]:
-    """Auto-detect device and AMP compatibility.
-
-    The ``REDSTAR_DEVICE`` environment variable overrides auto-detection.
-    Set it to ``cpu``, ``cuda``, or ``mps`` to force a specific device.
-    """
-    import os
-
-    env_device = os.environ.get("REDSTAR_DEVICE", "").lower()
-    if env_device:
-        return torch.device(env_device), use_amp and env_device == "cuda"
-    if torch.cuda.is_available():
-        return torch.device("cuda"), use_amp
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps"), False
-    return torch.device("cpu"), False
 
 
 def create_run_dir(output_dir: Path) -> Path:
@@ -125,7 +110,7 @@ class Trainer:
         self.output_dir = self._resolve_output_dir(output_dir)
 
         self.config = TrainingConfig.from_dict(cfg)
-        self.device, self.use_amp = get_device_and_amp(
+        self.device, self.use_amp, self.backend = detect_device(
             self.config.use_amp,
         )
         self.model = self.model.to(self.device)
@@ -586,11 +571,12 @@ class Trainer:
         """Log training configuration at start."""
         logger.info(
             "Training config: epochs=%d, lr=%.6f, "
-            "batch_size=%d, device=%s, amp=%s",
+            "batch_size=%d, device=%s, backend=%s, amp=%s",
             self.config.epochs,
             self.config.lr,
             self.config.batch_size,
             self.device,
+            self.backend,
             self.use_amp,
         )
         logger.info(

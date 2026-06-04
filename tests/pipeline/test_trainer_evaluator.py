@@ -10,11 +10,8 @@ import torch
 from redstar_plate_ocr.nn.metrics import CharacterAccuracy
 from redstar_plate_ocr.nn.model import PlateOCRModel
 from redstar_plate_ocr.pipeline.evaluator import Evaluator
-from redstar_plate_ocr.pipeline.trainer import (
-    Trainer,
-    get_device_and_amp,
-)
-from redstar_plate_ocr.pipeline.utils import greedy_decode
+from redstar_plate_ocr.pipeline.trainer import Trainer
+from redstar_plate_ocr.pipeline.utils import detect_device, greedy_decode
 from redstar_plate_ocr.plate.config import PlateConfig
 
 
@@ -109,42 +106,49 @@ def _make_mock_batch() -> dict:
 
 
 def test_device_and_amp_cpu():
-    """CPU → amp=False when no CUDA/MPS."""
+    """CPU → (cpu, False, "cpu") when no CUDA/MPS."""
     with (
-        patch("redstar_plate_ocr.pipeline.trainer.torch.cuda") as mock_cuda,
+        patch("redstar_plate_ocr.pipeline.utils.torch.cuda") as mock_cuda,
         patch(
-            "redstar_plate_ocr.pipeline.trainer.torch.backends"
+            "redstar_plate_ocr.pipeline.utils.torch.backends"
         ) as mock_backends,
     ):
         mock_cuda.is_available.return_value = False
         mock_backends.mps.is_available.return_value = False
-        device, amp = get_device_and_amp(True)
+        device, amp, backend = detect_device(use_amp=True)
         assert device == torch.device("cpu")
         assert amp is False
+        assert backend == "cpu"
 
 
 def test_device_and_amp_cuda():
-    """CUDA → amp=True when use_amp=True."""
-    with patch("redstar_plate_ocr.pipeline.trainer.torch.cuda") as mock_cuda:
+    """CUDA → (cuda, True, "cuda") when CUDA available."""
+    with patch(
+        "redstar_plate_ocr.pipeline.utils.torch.cuda"
+    ) as mock_cuda, patch.object(
+        torch.version, "hip", None,
+    ):
         mock_cuda.is_available.return_value = True
-        device, amp = get_device_and_amp(True)
+        device, amp, backend = detect_device(use_amp=True)
         assert device == torch.device("cuda")
         assert amp is True
+        assert backend == "cuda"
 
 
 def test_device_and_amp_mps():
-    """MPS → amp=False."""
+    """MPS → (mps, False, "mps") when MPS available."""
     with (
-        patch("redstar_plate_ocr.pipeline.trainer.torch.cuda") as mock_cuda,
+        patch("redstar_plate_ocr.pipeline.utils.torch.cuda") as mock_cuda,
         patch(
-            "redstar_plate_ocr.pipeline.trainer.torch.backends"
+            "redstar_plate_ocr.pipeline.utils.torch.backends"
         ) as mock_backends,
     ):
         mock_cuda.is_available.return_value = False
         mock_backends.mps.is_available.return_value = True
-        device, amp = get_device_and_amp(True)
+        device, amp, backend = detect_device(use_amp=True)
         assert device == torch.device("mps")
         assert amp is False
+        assert backend == "mps"
 
 
 # --- Trainer init test ---
@@ -184,8 +188,8 @@ def test_trainer_init(plate_config: PlateConfig):
     }
 
     with patch(
-        "redstar_plate_ocr.pipeline.trainer.get_device_and_amp",
-        return_value=(torch.device("cpu"), False),
+        "redstar_plate_ocr.pipeline.utils.detect_device",
+        return_value=(torch.device("cpu"), False, "cpu"),
     ):
         trainer = Trainer(
             model=model,
@@ -227,8 +231,8 @@ def test_format_epoch_stats_shows_compact_metrics():
     # First epoch → no arrows
     assert "↑" not in result
     assert "↓" not in result
-    # region and fmt are shown; std and sq are shown
-    assert "region=92.0%" in result
+    # country and fmt are shown; std and sq are shown
+    assert "country=92.0%" in result
     assert "fmt=78.0%" in result
     assert "std=0.0%" in result
     assert "sq=60.0%" in result

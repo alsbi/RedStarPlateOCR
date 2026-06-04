@@ -3,11 +3,94 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 import numpy as np
 import torch
 from torch import Tensor
+
+logger = logging.getLogger(__name__)
+
+
+def detect_device(
+    use_amp: bool = False,
+) -> tuple[torch.device, bool, str]:
+    """Auto-detect best available device with backend awareness.
+
+    The ``REDSTAR_DEVICE`` environment variable overrides auto-detection.
+    Set it to ``cuda``, ``mps``, or ``cpu`` to force a specific device.
+
+    Returns:
+        Tuple of (device, use_amp, backend) where *backend* is one of:
+        ``"cuda"``, ``"rocm"``, ``"mps"``, ``"cpu"``.
+    """
+    env_device = os.environ.get("REDSTAR_DEVICE", "").lower()
+    if env_device:
+        try:
+            device = torch.device(env_device)
+        except RuntimeError:
+            logger.warning(
+                "REDSTAR_DEVICE=%s is not a valid device, "
+                "falling back to auto-detect",
+                env_device,
+            )
+        else:
+            if device.type == "cuda" and torch.cuda.is_available():
+                backend = _resolve_cuda_backend()
+                return device, use_amp, backend
+            if (
+                device.type == "mps"
+                and hasattr(torch.backends, "mps")
+                and torch.backends.mps.is_available()
+            ):
+                return device, False, "mps"
+            if device.type == "cpu":
+                return device, False, "cpu"
+            logger.warning(
+                "REDSTAR_DEVICE=%s unavailable, falling back to auto-detect",
+                env_device,
+            )
+
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        backend = _resolve_cuda_backend()
+        return device, use_amp, backend
+    if (
+        hasattr(torch.backends, "mps")
+        and torch.backends.mps.is_available()
+    ):
+        return torch.device("mps"), False, "mps"
+    return torch.device("cpu"), False, "cpu"
+
+
+def _resolve_cuda_backend() -> str:
+    """Return ``\"rocm\"`` when running on AMD HIP, ``\"cuda\"`` otherwise."""
+    return "rocm" if getattr(torch.version, "hip", None) else "cuda"
+
+
+def get_onnx_providers() -> list[str]:
+    """Return ordered ONNX Runtime providers matching available backend.
+
+    Priority: ``ROCmExecutionProvider`` → ``CUDAExecutionProvider`` →
+    ``CPUExecutionProvider``.  Filters to only providers actually available
+    in the current ONNX Runtime build.
+
+    Use this instead of calling ``InferenceSession(path)`` without
+    ``providers=`` — on ROCM the default may silently fall back to CPU.
+    """
+    try:
+        import onnxruntime as ort  # type: ignore[import-untyped]
+    except ImportError:
+        return ["CPUExecutionProvider"]
+
+    available = ort.get_available_providers()
+    preferred: list[str] = [
+        "ROCmExecutionProvider",
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider",
+    ]
+    return [p for p in preferred if p in available]
 
 
 def to_long_tensor(
@@ -136,7 +219,7 @@ def _format_section_1(
         f"🎯  plate={plate:.1%}{plate_tag}{cache_tag} "
         f"cer={cer:.4f}{cer_tag} "
         f"char={char:.1%} "
-        f"region={country:.1%} "
+        f"country={country:.1%} "
         f"fmt={fmt:.1%} "
         f"std={std:.1%} "
         f"sq={sq:.1%}"
@@ -159,15 +242,14 @@ def format_epoch_stats(
     best_metrics: dict[str, float],
     train_loss: float,
     *,
-    is_cached: bool = False,
     epoch_duration: float = 0.0,
 ) -> str:
     """Format epoch stats for line 1 of progress bar.
 
     Three sections separated by │:
-    1. Core metrics: plate, cer, char, region, fmt
+    1. Core metrics: plate, cer, char, country, format
     2. Per-country: BY=X% GE=X% ...
-    3. System: loss, duration, ETA
+    3. System: loss, duration
     """
     is_first = not best_metrics
 
@@ -188,7 +270,6 @@ def format_epoch_stats(
         best_cer,
         is_first,
     )
-    cache_tag = " (cached)" if is_cached else ""
 
     core = _format_section_1(
         plate,
@@ -200,7 +281,7 @@ def format_epoch_stats(
         sq,
         plate_tag,
         cer_tag,
-        cache_tag,
+        "",
     )
     per_country = _format_per_country(val_metrics)
     sys_str = _format_sys(train_loss, epoch_duration)
@@ -218,17 +299,16 @@ def format_train_epoch_stats(
 ) -> str:
     """Format epoch stats during training (val=N/A before first validation).
 
-    Uses best_metrics if available (cached), otherwise shows placeholders.
+    Uses best_metrics if available, otherwise shows placeholders.
     """
     if best_metrics:
         return format_epoch_stats(
             best_metrics,
             best_metrics,
             train_loss,
-            is_cached=True,
             epoch_duration=epoch_duration,
         )
-    core = "plate=— cer=— char=— region=— fmt=—"
+    core = "plate=— cer=— char=— country=— format=—"
     sys_parts: list[str] = [f"loss={train_loss:.4f}"]
     if epoch_duration > 0:
         sys_parts.append(format_duration(epoch_duration))
@@ -269,7 +349,7 @@ def _build_main_log_line(
 ) -> str:
     """Build main epoch log line."""
     plate = val_metrics.get("val_plate_accuracy", 0.0)
-    region = val_metrics.get("val_country_accuracy", 0.0)
+    ctry = val_metrics.get("val_country_accuracy", 0.0)
     fmt = val_metrics.get("val_format_accuracy", 0.0)
     cer = val_metrics.get("val_cer", 0.0)
     char = val_metrics.get("val_char_accuracy", 0.0)
@@ -280,7 +360,7 @@ def _build_main_log_line(
         f"plate={plate:.4f}",
         f"std_plate={std:.4f}",
         f"sq_plate={sq:.4f}",
-        f"region={region:.4f}",
+        f"country={ctry:.4f}",
         f"format={fmt:.4f}",
         f"cer={cer:.4f}",
         f"char={char:.4f}",

@@ -99,7 +99,6 @@ training:
   weight_decay: 0.02
   label_smoothing: 0.01
   gradient_clip: 1.1
-  gradient_clip_type: norm
   use_amp: true
   no_aug_epochs: 5
   warmup_epochs: 8
@@ -127,7 +126,7 @@ training:
     patience: 5
     factor: 0.5
     final_lr_factor: 0.01
-  num_workers: 2
+  num_workers: 4
   log_interval: 20
   log_grad_interval: 100
 

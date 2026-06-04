@@ -12,6 +12,7 @@ import torch
 from torch import Tensor
 
 from redstar_plate_ocr.nn.model import PlateOCRModel
+from redstar_plate_ocr.pipeline.utils import get_onnx_providers
 from redstar_plate_ocr.plate.config import PlateConfig
 
 logger = logging.getLogger(__name__)
@@ -232,7 +233,8 @@ class Exporter:
         with torch.no_grad():
             pt_out = wrapper(images, orig_h, orig_w)
 
-        session = ort.InferenceSession(path)
+        providers = get_onnx_providers()
+        session = ort.InferenceSession(path, providers=providers)
         ort_out = session.run(
             None,
             {

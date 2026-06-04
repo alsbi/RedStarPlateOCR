@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import albumentations as A
@@ -332,6 +333,7 @@ def _infrared_glow_transform(
     tint_strength: float = 0.3,
     contrast_boost: float = 1.4,
     glow_sigma: int = 3,
+    **kwargs: Any,
 ) -> np.ndarray:
     """Apply infrared-glow effect to an image.
 
@@ -395,15 +397,14 @@ def _build_infrared_glow(
     contrast_boost = cfg.get("contrast_boost", 1.4)
     glow_sigma = cfg.get("glow_sigma", 3)
 
-    def _apply(image: np.ndarray, **kwargs: Any) -> np.ndarray:
-        return _infrared_glow_transform(
-            image,
-            tint_strength=tint_strength,
-            contrast_boost=contrast_boost,
-            glow_sigma=glow_sigma,
-        )
-
-    return A.Lambda(image=_apply, name="infrared_glow", p=cfg.get("p", 0.5))
+    # Use partial (picklable) instead of a nested closure
+    fn = partial(
+        _infrared_glow_transform,
+        tint_strength=tint_strength,
+        contrast_boost=contrast_boost,
+        glow_sigma=glow_sigma,
+    )
+    return A.Lambda(image=fn, name="infrared_glow", p=cfg.get("p", 0.5))
 
 
 def _build_affine(

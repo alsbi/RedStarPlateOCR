@@ -32,8 +32,8 @@ def _make_trainer(plate_config: PlateConfig, **overrides) -> Trainer:
         "augmentation": {},
     }
     with patch(
-        "redstar_plate_ocr.pipeline.trainer.get_device_and_amp",
-        return_value=(torch.device("cpu"), False),
+        "redstar_plate_ocr.pipeline.utils.detect_device",
+        return_value=(torch.device("cpu"), False, "cpu"),
     ):
         return Trainer(
             model=model,
@@ -56,8 +56,8 @@ def test_update_every_n_batches_default(plate_config: PlateConfig):
     model = PlateOCRModel(plate_config=pc)
     cfg = {"training": {"use_amp": False}}
     with patch(
-        "redstar_plate_ocr.pipeline.trainer.get_device_and_amp",
-        return_value=(torch.device("cpu"), False),
+        "redstar_plate_ocr.pipeline.utils.detect_device",
+        return_value=(torch.device("cpu"), False, "cpu"),
     ):
         trainer = Trainer(
             model=model,
