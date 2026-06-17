@@ -256,3 +256,6 @@ node_modules/
 .tool-versions
 /scripts/
 /.roomodes
+
+# Plans and design docs
+plans/
